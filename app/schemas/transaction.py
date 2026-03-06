@@ -3,7 +3,6 @@ from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel
 from pydantic import ConfigDict
-from app.models.transaction import TransactionStatus
 
 
 class TransactionCreate(BaseModel):
@@ -20,7 +19,6 @@ class TransactionUpdate(BaseModel):
     currency: str | None = None
     description: str | None = None
     occurred_at: datetime | None = None
-    status: TransactionStatus | None = None
 
 
 class TransactionRead(BaseModel):
@@ -30,7 +28,6 @@ class TransactionRead(BaseModel):
     currency: str
     description: str | None
     occurred_at: datetime
-    status: TransactionStatus
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

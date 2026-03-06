@@ -1,5 +1,4 @@
 import uuid
-import enum
 
 from sqlalchemy import (
     Column,
@@ -7,7 +6,6 @@ from sqlalchemy import (
     String,
     Numeric,
     DateTime,
-    Enum,
     func,
     Index,
     Uuid,
@@ -15,11 +13,6 @@ from sqlalchemy import (
 
 from sqlalchemy.orm import relationship
 from app.database.base import Base
-
-
-class TransactionStatus(str, enum.Enum):
-    pending = "pending"
-    posted = "posted"
 
 
 class Transaction(Base):
@@ -58,12 +51,6 @@ class Transaction(Base):
 
     occurred_at = Column(
         DateTime(timezone=True),
-        nullable=False
-    )
-
-    status = Column(
-        Enum(TransactionStatus),
-        default=TransactionStatus.posted,
         nullable=False
     )
 

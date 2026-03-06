@@ -114,11 +114,10 @@ def test_transaction_crud(client):
 
     updated = client.put(
         f"/transactions/{transaction_id}",
-        json={"description": "Cab", "status": "pending"},
+        json={"description": "Cab"},
     )
     assert updated.status_code == 200
     assert updated.json()["description"] == "Cab"
-    assert updated.json()["status"] == "pending"
 
     deleted = client.delete(f"/transactions/{transaction_id}")
     assert deleted.status_code == 204
