@@ -56,8 +56,6 @@ class Transaction(Base):
 
     description = Column(String)
 
-    merchant_name = Column(String)
-
     occurred_at = Column(
         DateTime(timezone=True),
         nullable=False

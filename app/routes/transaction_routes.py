@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime
@@ -6,8 +6,13 @@ from datetime import datetime
 from app.core.auth import get_current_user_id
 from app.database.session import get_db
 from app.models.transaction import Transaction
-from app.schemas.transaction import TransactionCreate, TransactionRead
-from app.services.transaction_service import create_transaction
+from app.schemas.transaction import TransactionCreate, TransactionRead, TransactionUpdate
+from app.services.transaction_service import (
+    create_transaction,
+    delete_transaction,
+    get_transaction,
+    update_transaction,
+)
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
@@ -30,20 +35,41 @@ def get_transactions_endpoint(
     offset: int = 0,
     db: Session = Depends(get_db)
 ):
-
-    query = db.query(Transaction).filter(
-        Transaction.user_id == user_id
-    )
-
+    query = db.query(Transaction).filter(Transaction.user_id == user_id)
     if category_id:
         query = query.filter(Transaction.category_id == category_id)
-
     if start_date:
         query = query.filter(Transaction.occurred_at >= start_date)
-
     if end_date:
         query = query.filter(Transaction.occurred_at <= end_date)
 
-    query = query.order_by(Transaction.occurred_at.desc())
+    return query.order_by(Transaction.occurred_at.desc()).offset(offset).limit(limit).all()
 
-    return query.offset(offset).limit(limit).all()
+
+@router.get("/{transaction_id}", response_model=TransactionRead)
+def get_transaction_endpoint(
+    transaction_id: UUID,
+    user_id=Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    return get_transaction(db, user_id, transaction_id)
+
+
+@router.put("/{transaction_id}", response_model=TransactionRead)
+def update_transaction_endpoint(
+    transaction_id: UUID,
+    transaction_data: TransactionUpdate,
+    user_id=Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    return update_transaction(db, user_id, transaction_id, transaction_data)
+
+
+@router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_transaction_endpoint(
+    transaction_id: UUID,
+    user_id=Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    delete_transaction(db, user_id, transaction_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

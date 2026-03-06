@@ -9,10 +9,16 @@ class UserCreate(BaseModel):
     email: EmailStr
 
 
+class UserUpdate(BaseModel):
+    name: str | None = None
+    email: EmailStr | None = None
+
+
 class UserRead(BaseModel):
     id: UUID
     name: str
     email: EmailStr
     created_at: datetime
+    deleted_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

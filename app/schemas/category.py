@@ -11,6 +11,12 @@ class CategoryCreate(BaseModel):
     parent_id: UUID | None = None
 
 
+class CategoryUpdate(BaseModel):
+    name: str | None = None
+    direction: CategoryDirection | None = None
+    parent_id: UUID | None = None
+
+
 class CategoryRead(BaseModel):
     id: UUID
     name: str

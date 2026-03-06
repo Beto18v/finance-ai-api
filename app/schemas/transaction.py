@@ -11,8 +11,16 @@ class TransactionCreate(BaseModel):
     amount: Decimal
     currency: str = "COP"
     description: str | None = None
-    merchant_name: str | None = None
     occurred_at: datetime
+
+
+class TransactionUpdate(BaseModel):
+    category_id: UUID | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    description: str | None = None
+    occurred_at: datetime | None = None
+    status: TransactionStatus | None = None
 
 
 class TransactionRead(BaseModel):
@@ -21,7 +29,6 @@ class TransactionRead(BaseModel):
     amount: Decimal
     currency: str
     description: str | None
-    merchant_name: str | None
     occurred_at: datetime
     status: TransactionStatus
     created_at: datetime
