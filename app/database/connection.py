@@ -24,6 +24,10 @@ elif "supabase.co" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=300,
     connect_args=connect_args,
 )
 

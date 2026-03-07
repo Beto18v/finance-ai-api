@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import time
+import threading
 from urllib.request import urlopen
 
 from fastapi import Depends, HTTPException
@@ -19,6 +20,7 @@ security = HTTPBearer(auto_error=False)
 
 _JWKS_CACHE: dict[str, object] = {"jwks": None, "ts": 0.0}
 _JWKS_TTL_SECONDS = 300
+_JWKS_LOCK = threading.Lock()
 
 
 def _get_jwt_secret() -> str:
@@ -53,17 +55,24 @@ def _fetch_jwks() -> dict:
     if cached and (now - ts) < _JWKS_TTL_SECONDS:
         return cached  # type: ignore[return-value]
 
-    url = _get_supabase_jwks_url()
-    try:
-        with urlopen(url, timeout=10) as resp:
-            data = resp.read().decode("utf-8")
-        jwks = json.loads(data)
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(f"Failed to fetch JWKS from {url}") from exc
+    with _JWKS_LOCK:
+        # Double-check after acquiring lock (another thread may have refreshed)
+        cached = _JWKS_CACHE.get("jwks")
+        ts = float(_JWKS_CACHE.get("ts") or 0.0)
+        if cached and (time.time() - ts) < _JWKS_TTL_SECONDS:
+            return cached  # type: ignore[return-value]
 
-    _JWKS_CACHE["jwks"] = jwks
-    _JWKS_CACHE["ts"] = now
-    return jwks
+        url = _get_supabase_jwks_url()
+        try:
+            with urlopen(url, timeout=10) as resp:
+                data = resp.read().decode("utf-8")
+            jwks = json.loads(data)
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(f"Failed to fetch JWKS from {url}") from exc
+
+        _JWKS_CACHE["jwks"] = jwks
+        _JWKS_CACHE["ts"] = time.time()
+        return jwks
 
 
 def _get_public_key_from_jwks(token: str):
