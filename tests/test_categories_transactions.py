@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 def test_create_category(client):
     # Ensure profile exists
-    client.get("/users/me")
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
     resp = client.post(
         "/categories/",
@@ -18,7 +18,7 @@ def test_create_category(client):
 
 def test_create_transaction_requires_existing_category(client):
     # Ensure profile exists
-    client.get("/users/me")
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
     resp = client.post(
         "/transactions/",
@@ -34,7 +34,7 @@ def test_create_transaction_requires_existing_category(client):
 
 
 def test_create_and_list_transactions(client):
-    client.get("/users/me")
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
     cat = client.post(
         "/categories/",
@@ -60,7 +60,7 @@ def test_create_and_list_transactions(client):
 
 
 def test_category_crud(client):
-    client.get("/users/me")
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
     created = client.post(
         "/categories/",
@@ -88,7 +88,7 @@ def test_category_crud(client):
 
 
 def test_transaction_crud(client):
-    client.get("/users/me")
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
     cat = client.post(
         "/categories/",

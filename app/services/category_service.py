@@ -1,14 +1,16 @@
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
+
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryUpdate
-import uuid
 
 
 def create_category(
     db: Session,
-    user_id,
-    category_data: CategoryCreate
+    user_id: UUID,
+    category_data: CategoryCreate,
 ):
 
     if category_data.parent_id is not None:
@@ -20,7 +22,6 @@ def create_category(
             raise HTTPException(status_code=404, detail="Parent category not found")
 
     category = Category(
-        id=uuid.uuid4(),
         user_id=user_id,
         name=category_data.name,
         direction=category_data.direction,
@@ -34,7 +35,7 @@ def create_category(
     return category
 
 
-def get_category(db: Session, user_id, category_id: uuid.UUID):
+def get_category(db: Session, user_id: UUID, category_id: UUID) -> Category:
     category = db.query(Category).filter(
         Category.id == category_id,
         Category.user_id == user_id,
@@ -44,7 +45,7 @@ def get_category(db: Session, user_id, category_id: uuid.UUID):
     return category
 
 
-def get_user_categories(db: Session, user_id):
+def get_user_categories(db: Session, user_id: UUID) -> list[Category]:
 
     return db.query(Category).filter(
         Category.user_id == user_id
@@ -53,8 +54,8 @@ def get_user_categories(db: Session, user_id):
 
 def update_category(
     db: Session,
-    user_id,
-    category_id: uuid.UUID,
+    user_id: UUID,
+    category_id: UUID,
     category_data: CategoryUpdate,
 ):
     category = get_category(db, user_id, category_id)
@@ -74,13 +75,12 @@ def update_category(
     for field, value in updates.items():
         setattr(category, field, value)
 
-    db.add(category)
     db.commit()
     db.refresh(category)
     return category
 
 
-def delete_category(db: Session, user_id, category_id: uuid.UUID) -> None:
+def delete_category(db: Session, user_id: UUID, category_id: UUID) -> None:
     category = get_category(db, user_id, category_id)
     db.delete(category)
     db.commit()

@@ -13,6 +13,7 @@ from app.services.category_service import (
     get_user_categories,
     update_category,
 )
+from app.services.user_service import ensure_active_user
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
@@ -23,6 +24,7 @@ def create_category_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
+    ensure_active_user(db, user_id)
     return create_category(db, user_id, category_data)
 
 
@@ -31,6 +33,7 @@ def get_categories_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
+    ensure_active_user(db, user_id)
     return get_user_categories(db, user_id)
 
 
@@ -40,6 +43,7 @@ def get_category_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    ensure_active_user(db, user_id)
     return get_category(db, user_id, category_id)
 
 
@@ -50,6 +54,7 @@ def update_category_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    ensure_active_user(db, user_id)
     return update_category(db, user_id, category_id, category_data)
 
 
@@ -59,5 +64,6 @@ def delete_category_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    ensure_active_user(db, user_id)
     delete_category(db, user_id, category_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

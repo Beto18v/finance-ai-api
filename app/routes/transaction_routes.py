@@ -5,14 +5,15 @@ from datetime import datetime
 
 from app.core.auth import get_current_user_id
 from app.database.session import get_db
-from app.models.transaction import Transaction
 from app.schemas.transaction import TransactionCreate, TransactionRead, TransactionUpdate
 from app.services.transaction_service import (
     create_transaction,
     delete_transaction,
     get_transaction,
+    list_transactions,
     update_transaction,
 )
+from app.services.user_service import ensure_active_user
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
@@ -23,6 +24,7 @@ def create_transaction_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
+    ensure_active_user(db, user_id)
     return create_transaction(db, user_id, transaction_data)
 
 @router.get("/", response_model=list[TransactionRead])
@@ -35,15 +37,16 @@ def get_transactions_endpoint(
     offset: int = 0,
     db: Session = Depends(get_db)
 ):
-    query = db.query(Transaction).filter(Transaction.user_id == user_id)
-    if category_id:
-        query = query.filter(Transaction.category_id == category_id)
-    if start_date:
-        query = query.filter(Transaction.occurred_at >= start_date)
-    if end_date:
-        query = query.filter(Transaction.occurred_at <= end_date)
-
-    return query.order_by(Transaction.occurred_at.desc()).offset(offset).limit(limit).all()
+    ensure_active_user(db, user_id)
+    return list_transactions(
+        db,
+        user_id,
+        category_id=category_id,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{transaction_id}", response_model=TransactionRead)
@@ -52,6 +55,7 @@ def get_transaction_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    ensure_active_user(db, user_id)
     return get_transaction(db, user_id, transaction_id)
 
 
@@ -62,6 +66,7 @@ def update_transaction_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    ensure_active_user(db, user_id)
     return update_transaction(db, user_id, transaction_id, transaction_data)
 
 
@@ -71,5 +76,6 @@ def delete_transaction_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    ensure_active_user(db, user_id)
     delete_transaction(db, user_id, transaction_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

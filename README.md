@@ -26,6 +26,9 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
   - contratos Pydantic para requests/responses.
 - `services/`
   - logica de negocio por recurso (usuarios, categorias, transacciones).
+  - todas las funciones reciben `user_id: UUID` tipado para consistencia.
+  - no llaman `db.add()` en objetos ya rastreados por la sesion; solo `db.commit()`.
+  - `list_transactions()` centraliza filtros (categoria, rango de fechas, limit/offset).
 - `routes/`
   - endpoints HTTP que acoplan auth + schemas + services.
 - `main.py`
@@ -55,7 +58,7 @@ Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services
 - `transactions`
   - pertenece a `user_id`.
   - referencia `category_id`.
-  - `amount`, `currency`, `occurred_at`, `status`.
+  - `amount`, `currency`, `occurred_at`.
 
 ## Seguridad y avisos de Supabase
 
@@ -150,11 +153,13 @@ curl -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me
 - Aplicar: `uv run alembic upgrade head`
 - Alinear version si tablas ya existen: `uv run alembic stamp head`
 
-Revisiones actuales:
-
-- `bfc04dbb3e27_init_schema.py` -> esquema inicial.
-- `9c2df3d91a7a_enable_rls_on_public_tables.py` -> seguridad RLS/policies.
-- `31f4e8d7c2ab_enable_rls_on_alembic_version.py` -> activa RLS en `public.alembic_version` para evitar warning de Supabase.
+- Revisiones actuales:
+  - `bfc04dbb3e27_init_schema.py` -> esquema inicial.
+  - `6bf0f8578784_drop_status_from_transactions.py` -> elimina columna `status`.
+  - `d2f7a1b9c8de_drop_merchant_name_from_transactions.py` -> elimina columna `merchant_name`.
+  - `9c2df3d91a7a_enable_rls_on_public_tables.py` -> seguridad RLS/policies.
+  - `c1a2d3e4f5a6_add_policy_to_alembic_version.py` -> policy para `alembic_version`.
+  - `31f4e8d7c2ab_enable_rls_on_alembic_version.py` -> activa RLS en `public.alembic_version` para evitar warning de Supabase.
 
 ## Pruebas
 

@@ -6,7 +6,7 @@ from app.database.session import get_db
 from app.schemas.user import UserCreate, UserRead, UserUpdate
 from app.services.user_service import (
     create_user,
-    get_or_create_user_from_claims,
+    get_current_active_user_from_claims,
     soft_delete_current_user,
     update_current_user,
 )
@@ -29,7 +29,7 @@ def get_me_endpoint(
     claims: dict = Depends(get_current_user_claims),
     db: Session = Depends(get_db),
 ):
-    return get_or_create_user_from_claims(db, user_id, claims)
+    return get_current_active_user_from_claims(db, user_id, claims)
 
 
 @router.put("/me", response_model=UserRead)
