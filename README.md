@@ -106,6 +106,12 @@ DATABASE_URL=postgresql://postgres:<password>@db.<project>.supabase.co:5432/post
 DB_SSLMODE=require
 ```
 
+Nota operativa:
+
+- La conexion directa `db.<project>.supabase.co:5432` puede requerir IPv6 en algunos entornos.
+- Si ves timeouts al conectar desde local en Windows o tu red no tiene salida IPv6 funcional, usa el connection string del `Session pooler` de Supabase en `DATABASE_URL`.
+- No requiere migraciones nuevas; es solo cambiar el host/puerto del string de conexion.
+
 Auth JWT (recomendado JWKS):
 
 ```env

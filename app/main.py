@@ -9,7 +9,7 @@ from app.core import settings
 from app.database.base import Base
 from app.database.connection import engine
 from app.core.errors import install_exception_handlers
-from app.routes import category_routes, transaction_routes, user_routes
+from app.routes import balance_routes, category_routes, transaction_routes, user_routes
 
 
 @asynccontextmanager
@@ -48,3 +48,4 @@ def healthcheck() -> dict[str, str]:
 app.include_router(user_routes.router)
 app.include_router(category_routes.router)
 app.include_router(transaction_routes.router)
+app.include_router(balance_routes.router)
