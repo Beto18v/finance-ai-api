@@ -5,6 +5,8 @@ def test_healthcheck(client):
 
 
 def test_cors_simple_request_headers(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
     resp = client.get(
         "/users/me",
         headers={"Origin": "http://localhost:3000"},

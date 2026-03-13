@@ -8,7 +8,50 @@ from fastapi import HTTPException
 from app.models.user import User
 from app.models.category import Category
 from app.models.transaction import Transaction
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserBootstrap, UserCreate, UserUpdate
+
+DEFAULT_USER_NAME = "User"
+
+
+def _clean_name(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _claim_email(claims: dict[str, Any]) -> str | None:
+    email = claims.get("email")
+    if not isinstance(email, str):
+        return None
+
+    cleaned = email.strip()
+    return cleaned or None
+
+
+def _claim_name(claims: dict[str, Any]) -> str | None:
+    candidates: list[Any] = [
+        claims.get("name"),
+        claims.get("full_name"),
+    ]
+
+    user_metadata = claims.get("user_metadata")
+    if isinstance(user_metadata, dict):
+        candidates.extend(
+            [
+                user_metadata.get("full_name"),
+                user_metadata.get("name"),
+                user_metadata.get("display_name"),
+            ]
+        )
+
+    for candidate in candidates:
+        cleaned = _clean_name(candidate)
+        if cleaned:
+            return cleaned
+
+    return None
 
 
 def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
@@ -42,10 +85,10 @@ def get_current_active_user_from_claims(
     if not user or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    email = claims.get("email")
+    email = _claim_email(claims)
     changed = False
 
-    if isinstance(email, str) and user.email != email:
+    if email and user.email != email:
         user.email = email
         changed = True
 
@@ -74,6 +117,51 @@ def update_current_user(db: Session, user_id: UUID, user_data: UserUpdate) -> Us
     if "email" in updated_fields and updated_fields["email"] is not None:
         user.email = str(updated_fields["email"])
 
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def bootstrap_current_user(
+    db: Session,
+    user_id: UUID,
+    claims: dict[str, Any],
+    user_data: UserBootstrap | None = None,
+) -> User:
+    user: User | None = db.query(User).filter(User.id == user_id).first()
+    if user and user.deleted_at is not None:
+        raise HTTPException(status_code=409, detail="User account has been deleted")
+
+    email = _claim_email(claims)
+    if not email:
+        raise HTTPException(status_code=400, detail="Authenticated user email is missing")
+
+    requested_name = _clean_name(user_data.name) if user_data else None
+    fallback_name = _claim_name(claims) or DEFAULT_USER_NAME
+
+    if user:
+        changed = False
+
+        if user.email != email:
+            user.email = email
+            changed = True
+
+        if requested_name and user.name != requested_name:
+            user.name = requested_name
+            changed = True
+
+        if changed:
+            db.commit()
+            db.refresh(user)
+
+        return user
+
+    user = User(
+        id=user_id,
+        name=requested_name or fallback_name,
+        email=email,
+    )
+    db.add(user)
     db.commit()
     db.refresh(user)
     return user

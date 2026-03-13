@@ -1,6 +1,55 @@
 from datetime import datetime, timezone
 
 
+def test_bootstrap_creates_profile_from_claims(client):
+    cleanup = client.delete("/users/me")
+    assert cleanup.status_code in (204, 404)
+
+    created = client.post("/users/me/bootstrap")
+    assert created.status_code == 200
+    data = created.json()
+    assert data["name"] == "Test User"
+    assert data["email"] == "test@example.com"
+
+    me = client.get("/users/me")
+    assert me.status_code == 200
+    assert me.json()["id"] == data["id"]
+
+
+def test_bootstrap_prefers_explicit_name_and_updates_existing_profile(client):
+    cleanup = client.delete("/users/me")
+    assert cleanup.status_code in (204, 404)
+
+    created = client.post(
+        "/users/",
+        json={"name": "Original Name", "email": "test@example.com"},
+    )
+    assert created.status_code == 200
+
+    bootstrapped = client.post("/users/me/bootstrap", json={"name": "Google Name"})
+    assert bootstrapped.status_code == 200
+    assert bootstrapped.json()["name"] == "Google Name"
+    assert bootstrapped.json()["email"] == "test@example.com"
+
+
+def test_bootstrap_does_not_restore_deleted_profile(client):
+    cleanup = client.delete("/users/me")
+    assert cleanup.status_code in (204, 404)
+
+    created = client.post(
+        "/users/",
+        json={"name": "To Delete", "email": "test@example.com"},
+    )
+    assert created.status_code == 200
+
+    deleted = client.delete("/users/me")
+    assert deleted.status_code == 204
+
+    bootstrapped = client.post("/users/me/bootstrap")
+    assert bootstrapped.status_code == 409
+    assert bootstrapped.json()["detail"] == "User account has been deleted"
+
+
 def test_users_me_requires_existing_active_profile(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)

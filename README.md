@@ -40,8 +40,9 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
 2. El backend recibe `Authorization: Bearer <token>`.
 3. `app/core/auth.py` valida JWT (JWKS o secret legacy).
 4. Del claim `sub` sale el `user_id` canonico del sistema.
-5. `GET /users/me` crea/actualiza la fila local en `public.users` y sincroniza email/nombre.
-6. `categories` y `transactions` siempre operan filtrando por `user_id`.
+5. `POST /users/me/bootstrap` crea el perfil local la primera vez (o sincroniza email/nombre si ya existe).
+6. `GET /users/me` devuelve el perfil activo y mantiene el email sincronizado con Auth.
+7. `categories` y `transactions` siempre operan filtrando por `user_id`.
 
 Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services), y ahora tambien se refuerza a nivel DB con RLS.
 
@@ -120,6 +121,12 @@ SUPABASE_URL=https://<project-ref>.supabase.co
 # SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
 ```
 
+Google OAuth:
+
+- No requiere variables nuevas en el backend.
+- El backend solo necesita seguir confiando en los JWT emitidos por Supabase Auth.
+- Si despliegas el dashboard fuera de `localhost:3000`, agrega su dominio a `CORS_ORIGINS`.
+
 Fallback legacy (si no usas JWKS):
 
 ```env
@@ -150,6 +157,7 @@ Checks utiles:
 
 ```bash
 curl http://127.0.0.1:8000/healthz
+curl -X POST -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me/bootstrap
 curl -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me
 ```
 

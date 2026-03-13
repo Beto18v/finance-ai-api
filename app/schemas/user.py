@@ -14,6 +14,10 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
 
 
+class UserBootstrap(BaseModel):
+    name: str | None = None
+
+
 class UserRead(BaseModel):
     id: UUID
     name: str

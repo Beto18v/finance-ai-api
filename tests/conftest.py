@@ -21,12 +21,12 @@ from app.database.session import get_db
 from app.main import app
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def test_user_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def test_claims(test_user_id: uuid.UUID) -> dict:
     return {
         "sub": str(test_user_id),
@@ -65,8 +65,14 @@ def db_session(engine):
 
     db = TestingSessionLocal()
     try:
+        # Keep one in-memory SQLite engine for the suite, but reset data per test.
+        for table in reversed(Base.metadata.sorted_tables):
+            db.execute(table.delete())
+        db.commit()
+
         yield db
     finally:
+        db.rollback()
         db.close()
 
 
