@@ -1,4 +1,4 @@
-# finance-ai-api
+# dinerance-api
 
 API backend para un SaaS de finanzas personales. Este documento esta escrito como mapa tecnico del proyecto: que hace cada capa, donde estan los riesgos, y que revisar cuando vuelvas al repo despues de un tiempo.
 

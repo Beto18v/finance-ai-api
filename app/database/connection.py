@@ -18,7 +18,7 @@ connect_args: dict[str, str] = {}
 db_sslmode = os.getenv("DB_SSLMODE")
 if db_sslmode:
     connect_args["sslmode"] = db_sslmode
-elif "supabase.co" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
+elif any(host in DATABASE_URL for host in ("supabase.co", "supabase.com")) and "sslmode=" not in DATABASE_URL:
     connect_args["sslmode"] = "require"
 
 engine = create_engine(

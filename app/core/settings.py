@@ -30,6 +30,14 @@ def cors_allow_credentials() -> bool:
     return env_bool("CORS_ALLOW_CREDENTIALS", default=True)
 
 
+def cors_origin_regex() -> str | None:
+    value = os.getenv("CORS_ORIGIN_REGEX")
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 def cors_allow_methods() -> list[str]:
     return env_csv(
         "CORS_ALLOW_METHODS",

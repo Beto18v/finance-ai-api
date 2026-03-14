@@ -4,6 +4,7 @@ import os
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from sqlalchemy.engine import make_url
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,18 @@ def _get_database_url() -> str:
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set")
+
+    db_sslmode = os.getenv("DB_SSLMODE")
+    if db_sslmode:
+        return make_url(url).update_query_dict({"sslmode": db_sslmode}).render_as_string(
+            hide_password=False
+        )
+
+    if any(host in url for host in ("supabase.co", "supabase.com")) and "sslmode=" not in url:
+        return make_url(url).update_query_dict({"sslmode": "require"}).render_as_string(
+            hide_password=False
+        )
+
     return url
 
 
