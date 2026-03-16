@@ -99,6 +99,15 @@ Nota operativa:
 
 ## Variables de entorno (referencia)
 
+Para separar local de produccion, usa:
+
+- `.env.local` solo en maquina para desarrollo.
+- variables del entorno/plataforma en Azure u otro host para produccion.
+- `.env.example` y `.env.local.example` solo como plantillas documentadas.
+
+La API solo intenta cargar `.env.local` en desarrollo. En produccion debe leer
+sus variables directamente del entorno del proceso.
+
 Base de datos:
 
 ```env
@@ -152,6 +161,12 @@ uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
+
+Recomendacion practica para desarrollo:
+
+1. Crea `dinerance-api/.env.local` a partir de `.env.local.example`.
+2. Usa ahi una base y un proyecto Supabase de desarrollo, no el de produccion.
+3. En `dinerance-dashboard/.env.local` apunta `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`.
 
 Checks utiles:
 
