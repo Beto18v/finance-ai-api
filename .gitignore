@@ -13,3 +13,6 @@ wheels/
 .env
 !.env.example
 .env.local.example
+
+# dependencies
+/node_modules
