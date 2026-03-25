@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 import os
 import uuid
+import asyncio
 
 # Ensure project root is on sys.path so `import app.*` works in pytest.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("TESTING", "1")
 
 import pytest
-from fastapi.testclient import TestClient
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,6 +20,47 @@ from sqlalchemy.pool import StaticPool
 from app.database.base import Base
 from app.database.session import get_db
 from app.main import app
+
+
+class CompatTestClient:
+    def __init__(self, app_, base_url: str = "http://testserver"):
+        self.app = app_
+        self.base_url = base_url
+        self.headers = {"user-agent": "testclient"}
+
+    def request(self, method: str, url: str, **kwargs):
+        async def send():
+            transport = httpx.ASGITransport(app=self.app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url=self.base_url,
+                headers=self.headers,
+                follow_redirects=True,
+            ) as client:
+                return await client.request(method, url, **kwargs)
+
+        return asyncio.run(send())
+
+    def get(self, url: str, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+    def put(self, url: str, **kwargs):
+        return self.request("PUT", url, **kwargs)
+
+    def delete(self, url: str, **kwargs):
+        return self.request("DELETE", url, **kwargs)
+
+    def options(self, url: str, **kwargs):
+        return self.request("OPTIONS", url, **kwargs)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 @pytest.fixture()
@@ -97,7 +139,7 @@ def client(db_session, test_user_id, test_claims):
     app.dependency_overrides[auth_module.get_current_user_id] = override_get_current_user_id
     app.dependency_overrides[auth_module.get_current_user_claims] = override_get_current_user_claims
 
-    with TestClient(app) as test_client:
+    with CompatTestClient(app) as test_client:
         yield test_client
 
     app.dependency_overrides.clear()
