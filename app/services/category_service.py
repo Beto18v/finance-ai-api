@@ -36,6 +36,44 @@ def ensure_unique_category_name(
     return normalized_name
 
 
+def ensure_parent_category_can_group(
+    db: Session,
+    user_id: UUID,
+    parent_id: UUID,
+    direction,
+) -> Category:
+    parent = db.query(Category).filter(
+        Category.id == parent_id,
+        Category.user_id == user_id,
+    ).first()
+
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent category not found")
+
+    if parent.parent_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Parent category must be top-level",
+        )
+
+    if parent.direction != direction:
+        raise HTTPException(
+            status_code=409,
+            detail="Parent category must have same direction",
+        )
+
+    return parent
+
+
+def category_has_children(db: Session, category_id: UUID) -> bool:
+    return (
+        db.query(Category)
+        .filter(Category.parent_id == category_id)
+        .first()
+        is not None
+    )
+
+
 def create_category(
     db: Session,
     user_id: UUID,
@@ -44,12 +82,12 @@ def create_category(
     normalized_name = ensure_unique_category_name(db, user_id, category_data.name)
 
     if category_data.parent_id is not None:
-        parent = db.query(Category).filter(
-            Category.id == category_data.parent_id,
-            Category.user_id == user_id,
-        ).first()
-        if not parent:
-            raise HTTPException(status_code=404, detail="Parent category not found")
+        ensure_parent_category_can_group(
+            db,
+            user_id,
+            category_data.parent_id,
+            category_data.direction,
+        )
 
     category = Category(
         user_id=user_id,
@@ -90,6 +128,8 @@ def update_category(
 ):
     category = get_category(db, user_id, category_id)
     updates = category_data.model_dump(exclude_unset=True)
+    resulting_direction = updates.get("direction", category.direction)
+    has_children = category_has_children(db, category.id)
 
     if "name" in updates:
         updates["name"] = ensure_unique_category_name(
@@ -99,16 +139,31 @@ def update_category(
             exclude_category_id=category.id,
         )
 
-    if "parent_id" in updates and updates["parent_id"] is not None:
+    if "parent_id" in updates:
         if updates["parent_id"] == category.id:
             raise HTTPException(status_code=400, detail="Category cannot be its own parent")
 
-        parent = db.query(Category).filter(
-            Category.id == updates["parent_id"],
-            Category.user_id == user_id,
-        ).first()
-        if not parent:
-            raise HTTPException(status_code=404, detail="Parent category not found")
+        if updates["parent_id"] is not None and has_children:
+            raise HTTPException(
+                status_code=409,
+                detail="Category already acts as a group",
+            )
+
+    if has_children and "direction" in updates and updates["direction"] != category.direction:
+        raise HTTPException(
+            status_code=409,
+            detail="Group direction cannot change while it has subcategories",
+        )
+
+    effective_parent_id = updates.get("parent_id", category.parent_id)
+
+    if effective_parent_id is not None:
+        ensure_parent_category_can_group(
+            db,
+            user_id,
+            effective_parent_id,
+            resulting_direction,
+        )
 
     for field, value in updates.items():
         setattr(category, field, value)

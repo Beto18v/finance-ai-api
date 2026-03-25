@@ -127,6 +127,121 @@ def test_update_category_to_duplicate_name_returns_conflict(client):
     assert updated.json()["detail"] == "Category already exists"
 
 
+def test_create_subcategory_under_subcategory_returns_conflict(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
+    parent = client.post(
+        "/categories/",
+        json={"name": "Home", "direction": "expense", "parent_id": None},
+    )
+    assert parent.status_code == 200
+
+    child = client.post(
+        "/categories/",
+        json={
+            "name": "Groceries",
+            "direction": "expense",
+            "parent_id": parent.json()["id"],
+        },
+    )
+    assert child.status_code == 200
+
+    nested_child = client.post(
+        "/categories/",
+        json={
+            "name": "Vegetables",
+            "direction": "expense",
+            "parent_id": child.json()["id"],
+        },
+    )
+    assert nested_child.status_code == 409
+    assert nested_child.json()["detail"] == "Parent category must be top-level"
+
+
+def test_group_category_with_children_cannot_become_subcategory(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
+    group = client.post(
+        "/categories/",
+        json={"name": "Home", "direction": "expense", "parent_id": None},
+    )
+    assert group.status_code == 200
+
+    child = client.post(
+        "/categories/",
+        json={
+            "name": "Groceries",
+            "direction": "expense",
+            "parent_id": group.json()["id"],
+        },
+    )
+    assert child.status_code == 200
+
+    other_parent = client.post(
+        "/categories/",
+        json={"name": "Fixed costs", "direction": "expense", "parent_id": None},
+    )
+    assert other_parent.status_code == 200
+
+    updated = client.put(
+        f"/categories/{group.json()['id']}",
+        json={"parent_id": other_parent.json()["id"]},
+    )
+    assert updated.status_code == 409
+    assert updated.json()["detail"] == "Category already acts as a group"
+
+
+def test_create_subcategory_with_different_direction_returns_conflict(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
+    income_group = client.post(
+        "/categories/",
+        json={"name": "Salary", "direction": "income", "parent_id": None},
+    )
+    assert income_group.status_code == 200
+
+    expense_child = client.post(
+        "/categories/",
+        json={
+            "name": "Groceries",
+            "direction": "expense",
+            "parent_id": income_group.json()["id"],
+        },
+    )
+    assert expense_child.status_code == 409
+    assert expense_child.json()["detail"] == "Parent category must have same direction"
+
+
+def test_group_direction_cannot_change_while_it_has_subcategories(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
+    group = client.post(
+        "/categories/",
+        json={"name": "Home", "direction": "expense", "parent_id": None},
+    )
+    assert group.status_code == 200
+
+    child = client.post(
+        "/categories/",
+        json={
+            "name": "Groceries",
+            "direction": "expense",
+            "parent_id": group.json()["id"],
+        },
+    )
+    assert child.status_code == 200
+
+    updated = client.put(
+        f"/categories/{group.json()['id']}",
+        json={"direction": "income"},
+    )
+    assert updated.status_code == 409
+    assert (
+        updated.json()["detail"]
+        == "Group direction cannot change while it has subcategories"
+    )
+
+
 def test_transaction_crud(client):
     client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
