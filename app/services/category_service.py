@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -7,11 +8,40 @@ from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryUpdate
 
 
+def normalize_category_name(name: str) -> str:
+    return " ".join(name.split())
+
+
+def ensure_unique_category_name(
+    db: Session,
+    user_id: UUID,
+    name: str,
+    exclude_category_id: UUID | None = None,
+) -> str:
+    normalized_name = normalize_category_name(name)
+
+    existing_category_query = db.query(Category).filter(
+        Category.user_id == user_id,
+        func.lower(func.trim(Category.name)) == normalized_name.lower(),
+    )
+
+    if exclude_category_id is not None:
+        existing_category_query = existing_category_query.filter(
+            Category.id != exclude_category_id
+        )
+
+    if existing_category_query.first():
+        raise HTTPException(status_code=409, detail="Category already exists")
+
+    return normalized_name
+
+
 def create_category(
     db: Session,
     user_id: UUID,
     category_data: CategoryCreate,
 ):
+    normalized_name = ensure_unique_category_name(db, user_id, category_data.name)
 
     if category_data.parent_id is not None:
         parent = db.query(Category).filter(
@@ -23,7 +53,7 @@ def create_category(
 
     category = Category(
         user_id=user_id,
-        name=category_data.name,
+        name=normalized_name,
         direction=category_data.direction,
         parent_id=category_data.parent_id
     )
@@ -60,6 +90,14 @@ def update_category(
 ):
     category = get_category(db, user_id, category_id)
     updates = category_data.model_dump(exclude_unset=True)
+
+    if "name" in updates:
+        updates["name"] = ensure_unique_category_name(
+            db,
+            user_id,
+            updates["name"],
+            exclude_category_id=category.id,
+        )
 
     if "parent_id" in updates and updates["parent_id"] is not None:
         if updates["parent_id"] == category.id:

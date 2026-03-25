@@ -87,6 +87,46 @@ def test_category_crud(client):
     assert missing.status_code == 404
 
 
+def test_create_duplicate_category_returns_conflict(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
+    created = client.post(
+        "/categories/",
+        json={"name": "Groceries", "direction": "expense", "parent_id": None},
+    )
+    assert created.status_code == 200
+
+    duplicated = client.post(
+        "/categories/",
+        json={"name": " groceries ", "direction": "income", "parent_id": None},
+    )
+    assert duplicated.status_code == 409
+    assert duplicated.json()["detail"] == "Category already exists"
+
+
+def test_update_category_to_duplicate_name_returns_conflict(client):
+    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+
+    first_category = client.post(
+        "/categories/",
+        json={"name": "Groceries", "direction": "expense", "parent_id": None},
+    )
+    assert first_category.status_code == 200
+
+    second_category = client.post(
+        "/categories/",
+        json={"name": "Transport", "direction": "expense", "parent_id": None},
+    )
+    assert second_category.status_code == 200
+
+    updated = client.put(
+        f"/categories/{second_category.json()['id']}",
+        json={"name": " groceries "},
+    )
+    assert updated.status_code == 409
+    assert updated.json()["detail"] == "Category already exists"
+
+
 def test_transaction_crud(client):
     client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
 
