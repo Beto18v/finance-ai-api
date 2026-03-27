@@ -2,9 +2,21 @@ import uuid
 from datetime import datetime, timezone
 
 
+def create_configured_user(client):
+    return client.post(
+        "/users/",
+        json={
+            "name": "Test User",
+            "email": "test@example.com",
+            "base_currency": "COP",
+            "timezone": "UTC",
+        },
+    )
+
+
 def test_create_category(client):
     # Ensure profile exists
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     resp = client.post(
         "/categories/",
@@ -18,7 +30,7 @@ def test_create_category(client):
 
 def test_create_transaction_requires_existing_category(client):
     # Ensure profile exists
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     resp = client.post(
         "/transactions/",
@@ -34,7 +46,7 @@ def test_create_transaction_requires_existing_category(client):
 
 
 def test_create_and_list_transactions(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     cat = client.post(
         "/categories/",
@@ -60,7 +72,7 @@ def test_create_and_list_transactions(client):
 
 
 def test_category_crud(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     created = client.post(
         "/categories/",
@@ -88,7 +100,7 @@ def test_category_crud(client):
 
 
 def test_create_duplicate_category_returns_conflict(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     created = client.post(
         "/categories/",
@@ -105,7 +117,7 @@ def test_create_duplicate_category_returns_conflict(client):
 
 
 def test_update_category_to_duplicate_name_returns_conflict(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     first_category = client.post(
         "/categories/",
@@ -128,7 +140,7 @@ def test_update_category_to_duplicate_name_returns_conflict(client):
 
 
 def test_create_subcategory_under_subcategory_returns_conflict(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     parent = client.post(
         "/categories/",
@@ -159,7 +171,7 @@ def test_create_subcategory_under_subcategory_returns_conflict(client):
 
 
 def test_group_category_with_children_cannot_become_subcategory(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     group = client.post(
         "/categories/",
@@ -192,7 +204,7 @@ def test_group_category_with_children_cannot_become_subcategory(client):
 
 
 def test_create_subcategory_with_different_direction_returns_conflict(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     income_group = client.post(
         "/categories/",
@@ -213,7 +225,7 @@ def test_create_subcategory_with_different_direction_returns_conflict(client):
 
 
 def test_group_direction_cannot_change_while_it_has_subcategories(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     group = client.post(
         "/categories/",
@@ -243,7 +255,7 @@ def test_group_direction_cannot_change_while_it_has_subcategories(client):
 
 
 def test_transaction_crud(client):
-    client.post("/users/", json={"name": "Test User", "email": "test@example.com"})
+    create_configured_user(client)
 
     cat = client.post(
         "/categories/",
@@ -279,3 +291,53 @@ def test_transaction_crud(client):
 
     missing = client.get(f"/transactions/{transaction_id}")
     assert missing.status_code == 404
+
+
+def test_delete_category_with_transactions_returns_conflict(client):
+    create_configured_user(client)
+
+    category = client.post(
+        "/categories/",
+        json={"name": "Utilities", "direction": "expense", "parent_id": None},
+    )
+    assert category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "amount": "120000.00",
+            "currency": "COP",
+            "description": "Water",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 200
+
+    deleted = client.delete(f"/categories/{category.json()['id']}")
+    assert deleted.status_code == 409
+    assert deleted.json()["detail"] == "Category has transactions"
+
+
+def test_delete_group_category_with_children_returns_conflict(client):
+    create_configured_user(client)
+
+    parent = client.post(
+        "/categories/",
+        json={"name": "Home", "direction": "expense", "parent_id": None},
+    )
+    assert parent.status_code == 200
+
+    child = client.post(
+        "/categories/",
+        json={
+            "name": "Groceries",
+            "direction": "expense",
+            "parent_id": parent.json()["id"],
+        },
+    )
+    assert child.status_code == 200
+
+    deleted = client.delete(f"/categories/{parent.json()['id']}")
+    assert deleted.status_code == 409
+    assert deleted.json()["detail"] == "Category has subcategories"

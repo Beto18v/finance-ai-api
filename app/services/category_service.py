@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.models.category import Category
+from app.models.transaction import Transaction
 from app.schemas.category import CategoryCreate, CategoryUpdate
 
 
@@ -69,6 +70,16 @@ def category_has_children(db: Session, category_id: UUID) -> bool:
     return (
         db.query(Category)
         .filter(Category.parent_id == category_id)
+        .first()
+        is not None
+    )
+
+
+def category_has_transactions(db: Session, category_id: UUID) -> bool:
+    return (
+        db.query(Transaction.id)
+        .filter(Transaction.category_id == category_id)
+        .limit(1)
         .first()
         is not None
     )
@@ -175,5 +186,12 @@ def update_category(
 
 def delete_category(db: Session, user_id: UUID, category_id: UUID) -> None:
     category = get_category(db, user_id, category_id)
+
+    if category_has_children(db, category.id):
+        raise HTTPException(status_code=409, detail="Category has subcategories")
+
+    if category_has_transactions(db, category.id):
+        raise HTTPException(status_code=409, detail="Category has transactions")
+
     db.delete(category)
     db.commit()

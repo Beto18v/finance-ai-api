@@ -6,6 +6,7 @@ from sqlalchemy import (
     String,
     Numeric,
     DateTime,
+    Date,
     func,
     Index,
     Uuid,
@@ -45,6 +46,31 @@ class Transaction(Base):
         String(3),
         default="COP",
         nullable=False
+    )
+
+    fx_rate = Column(
+        Numeric(18, 8),
+        nullable=True
+    )
+
+    fx_rate_date = Column(
+        Date,
+        nullable=True
+    )
+
+    fx_rate_source = Column(
+        String(64),
+        nullable=True
+    )
+
+    base_currency = Column(
+        String(3),
+        nullable=True
+    )
+
+    amount_in_base_currency = Column(
+        Numeric(14, 2),
+        nullable=True
     )
 
     description = Column(String)

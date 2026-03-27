@@ -1,6 +1,17 @@
 from datetime import datetime, timezone
 
 
+def create_configured_user(client, **overrides):
+    payload = {
+        "name": "Test User",
+        "email": "test@example.com",
+        "base_currency": "COP",
+        "timezone": "UTC",
+    }
+    payload.update(overrides)
+    return client.post("/users/", json=payload)
+
+
 def test_bootstrap_creates_profile_from_claims(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
@@ -74,10 +85,7 @@ def test_users_me_update_soft_delete_and_explicit_recreate(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
-    created = client.post(
-        "/users/",
-        json={"name": "Test User", "email": "test@example.com"},
-    )
+    created = create_configured_user(client)
     assert created.status_code == 200
 
     updated = client.put("/users/me", json={"name": "Updated User"})
@@ -91,10 +99,7 @@ def test_users_me_update_soft_delete_and_explicit_recreate(client):
     missing = client.get("/users/me")
     assert missing.status_code == 404
 
-    recreated = client.post(
-        "/users/",
-        json={"name": "Recreated User", "email": "test@example.com"},
-    )
+    recreated = create_configured_user(client, name="Recreated User")
     assert recreated.status_code == 200
     assert recreated.json()["deleted_at"] is None
     assert recreated.json()["name"] == "Recreated User"
@@ -104,10 +109,7 @@ def test_delete_account_purges_categories_and_transactions(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
-    created = client.post(
-        "/users/",
-        json={"name": "Test User", "email": "test@example.com"},
-    )
+    created = create_configured_user(client)
     assert created.status_code == 200
 
     category = client.post(
@@ -135,10 +137,7 @@ def test_delete_account_purges_categories_and_transactions(client):
     missing = client.get("/users/me")
     assert missing.status_code == 404
 
-    recreated = client.post(
-        "/users/",
-        json={"name": "Again", "email": "test@example.com"},
-    )
+    recreated = create_configured_user(client, name="Again")
     assert recreated.status_code == 200
 
     categories = client.get("/categories/")

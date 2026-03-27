@@ -89,8 +89,9 @@ def engine():
     from app.models.user import User
     from app.models.category import Category
     from app.models.transaction import Transaction
+    from app.models.exchange_rate import ExchangeRate
 
-    _ = (User, Category, Transaction)
+    _ = (User, Category, Transaction, ExchangeRate)
 
     Base.metadata.create_all(bind=engine_)
     return engine_

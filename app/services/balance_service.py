@@ -1,13 +1,17 @@
-from datetime import datetime, timezone, date
-from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import case, extract, func
+from fastapi import HTTPException
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
+from app.analytics import AnalyticsTransactionRow, build_monthly_balance_overview
 from app.models.category import Category, CategoryDirection
 from app.models.transaction import Transaction
-from app.schemas.balance import BalanceMonthRead, BalanceOverviewRead
+from app.services.user_service import ensure_active_user
+from app.schemas.balance import (
+    BalanceMonthRead,
+    BalanceOverviewRead,
+)
 
 
 def get_balance_overview(
@@ -17,93 +21,77 @@ def get_balance_overview(
     year: int | None = None,
     month: int | None = None,
 ) -> BalanceOverviewRead:
-    year_expr = extract("year", Transaction.occurred_at)
-    month_expr = extract("month", Transaction.occurred_at)
+    user = ensure_active_user(db, user_id)
+    if not user.base_currency:
+        raise HTTPException(
+            status_code=409,
+            detail="User base currency must be configured before calculating balance",
+        )
 
-    monthly_rows = (
+    # Analytics only consume base-currency snapshots so raw amounts from mixed
+    # currencies never leak into a consolidated total.
+    transaction_rows = (
         db.query(
-            year_expr.label("year"),
-            month_expr.label("month"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (Category.direction == CategoryDirection.income, Transaction.amount),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("income"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (Category.direction == CategoryDirection.expense, Transaction.amount),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("expense"),
+            Transaction.id,
+            Transaction.occurred_at,
+            Transaction.currency,
+            Transaction.base_currency,
+            Transaction.amount_in_base_currency,
+            Category.direction,
         )
         .join(Category, Transaction.category_id == Category.id)
-        .filter(Transaction.user_id == user_id, Category.user_id == user_id)
-        .group_by(year_expr, month_expr)
-        .order_by(
-            year_expr.desc(),
-            month_expr.desc(),
+        .filter(
+            and_(
+                Transaction.user_id == user_id,
+                Category.user_id == user_id,
+            )
         )
         .all()
     )
 
-    series = [
-        _build_month_summary(
-            year=int(row.year),
-            month=int(row.month),
-            income=row.income,
-            expense=row.expense,
-        )
-        for row in monthly_rows
-    ]
-    monthly_map = {
-        (item.month_start.year, item.month_start.month): item for item in series
-    }
-
-    if year is None or month is None:
-        if series:
-            selected_month = series[0].month_start
-            year = selected_month.year
-            month = selected_month.month
-        else:
-            today = datetime.now(timezone.utc).date()
-            year = today.year
-            month = today.month
-
-    current = monthly_map.get((year, month)) or _build_month_summary(
+    overview = build_monthly_balance_overview(
+        [
+            AnalyticsTransactionRow(
+                transaction_id=row.id,
+                occurred_at=row.occurred_at,
+                direction=_direction_to_text(row.direction),
+                source_currency=row.currency,
+                base_currency=row.base_currency,
+                amount_in_base_currency=row.amount_in_base_currency,
+            )
+            for row in transaction_rows
+        ],
+        base_currency=user.base_currency,
+        timezone_name=user.timezone or "UTC",
         year=year,
         month=month,
-        income=Decimal("0.00"),
-        expense=Decimal("0.00"),
     )
 
-    return BalanceOverviewRead(current=current, series=series)
-
-
-def _build_month_summary(
-    *,
-    year: int,
-    month: int,
-    income: Decimal,
-    expense: Decimal,
-) -> BalanceMonthRead:
-    normalized_income = _normalize_decimal(income)
-    normalized_expense = _normalize_decimal(expense)
-    return BalanceMonthRead(
-        month_start=date(year, month, 1),
-        income=normalized_income,
-        expense=normalized_expense,
-        balance=normalized_income - normalized_expense,
+    return BalanceOverviewRead(
+        currency=overview.currency,
+        current=BalanceMonthRead(
+            month_start=overview.current.month_start,
+            currency=overview.current.currency,
+            income=overview.current.income,
+            expense=overview.current.expense,
+            balance=overview.current.balance,
+            skipped_transactions=overview.current.skipped_transactions,
+        ),
+        series=[
+            BalanceMonthRead(
+                month_start=item.month_start,
+                currency=item.currency,
+                income=item.income,
+                expense=item.expense,
+                balance=item.balance,
+                skipped_transactions=item.skipped_transactions,
+            )
+            for item in overview.series
+        ],
     )
 
 
-def _normalize_decimal(value: Decimal | int | float) -> Decimal:
-    if isinstance(value, Decimal):
-        return value.quantize(Decimal("0.01"))
-    return Decimal(str(value)).quantize(Decimal("0.01"))
+def _direction_to_text(direction: CategoryDirection | str) -> str:
+    if isinstance(direction, CategoryDirection):
+        return direction.value
+    return str(direction)

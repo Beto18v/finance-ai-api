@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.category import Category
 from app.models.transaction import Transaction
 from app.schemas.user import UserBootstrap, UserCreate, UserUpdate
+from app.services.exchange_rate_service import refresh_transaction_fx_snapshots_for_user
 
 DEFAULT_USER_NAME = "User"
 
@@ -59,8 +60,14 @@ def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
     if user:
         if user.deleted_at is not None:
             user.deleted_at = None
-        user.name = user_data.name
-        user.email = str(user_data.email)
+        update_data = user_data.model_dump(exclude_unset=True)
+        if "email" in update_data and update_data["email"] is not None:
+            update_data["email"] = str(update_data["email"])
+        _apply_user_updates(
+            db,
+            user,
+            update_data,
+        )
         db.commit()
         db.refresh(user)
         return user
@@ -69,6 +76,8 @@ def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
         id=user_id,
         name=user_data.name,
         email=str(user_data.email),
+        base_currency=user_data.base_currency,
+        timezone=user_data.timezone,
     )
     db.add(user)
     db.commit()
@@ -112,10 +121,7 @@ def update_current_user(db: Session, user_id: UUID, user_data: UserUpdate) -> Us
         raise HTTPException(status_code=404, detail="User not found")
 
     updated_fields: dict[str, Any] = user_data.model_dump(exclude_unset=True)
-    if "name" in updated_fields and isinstance(updated_fields["name"], str):
-        user.name = updated_fields["name"]
-    if "email" in updated_fields and updated_fields["email"] is not None:
-        user.email = str(updated_fields["email"])
+    _apply_user_updates(db, user, updated_fields)
 
     db.commit()
     db.refresh(user)
@@ -150,6 +156,11 @@ def bootstrap_current_user(
             user.name = requested_name
             changed = True
 
+        if user_data:
+            bootstrap_updates = user_data.model_dump(exclude_unset=True)
+            if bootstrap_updates:
+                changed = _apply_user_updates(db, user, bootstrap_updates) or changed
+
         if changed:
             db.commit()
             db.refresh(user)
@@ -160,6 +171,8 @@ def bootstrap_current_user(
         id=user_id,
         name=requested_name or fallback_name,
         email=email,
+        base_currency=user_data.base_currency if user_data else None,
+        timezone=user_data.timezone if user_data else None,
     )
     db.add(user)
     db.commit()
@@ -177,3 +190,61 @@ def soft_delete_current_user(db: Session, user_id: UUID) -> None:
     _ = db.query(Category).filter(Category.user_id == user_id).delete(synchronize_session=False)
     user.deleted_at = datetime.now(timezone.utc)
     db.commit()
+
+
+def _apply_user_updates(
+    db: Session,
+    user: User,
+    updated_fields: dict[str, Any],
+) -> bool:
+    changed = False
+
+    if "name" in updated_fields and isinstance(updated_fields["name"], str):
+        if user.name != updated_fields["name"]:
+            user.name = updated_fields["name"]
+            changed = True
+
+    if "email" in updated_fields and updated_fields["email"] is not None:
+        normalized_email = str(updated_fields["email"])
+        if user.email != normalized_email:
+            user.email = normalized_email
+            changed = True
+
+    if "timezone" in updated_fields:
+        timezone_name = updated_fields["timezone"]
+        if timezone_name is None:
+            raise HTTPException(status_code=422, detail="Timezone is required")
+        if user.timezone != timezone_name:
+            user.timezone = timezone_name
+            changed = True
+
+    if "base_currency" in updated_fields:
+        base_currency = updated_fields["base_currency"]
+        if base_currency is None:
+            raise HTTPException(status_code=422, detail="Base currency is required")
+
+        if user.base_currency != base_currency:
+            if user.base_currency is not None and _user_has_transactions(db, user.id):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Base currency cannot change after transactions exist",
+                )
+
+            first_base_currency_assignment = user.base_currency is None
+            user.base_currency = base_currency
+            changed = True
+
+            if first_base_currency_assignment and _user_has_transactions(db, user.id):
+                refresh_transaction_fx_snapshots_for_user(db, user)
+
+    return changed
+
+
+def _user_has_transactions(db: Session, user_id: UUID) -> bool:
+    return (
+        db.query(Transaction.id)
+        .filter(Transaction.user_id == user_id)
+        .limit(1)
+        .first()
+        is not None
+    )

@@ -18,6 +18,7 @@ async def lifespan(_: FastAPI):
     from app.models.user import User  # noqa: F401
     from app.models.category import Category  # noqa: F401
     from app.models.transaction import Transaction  # noqa: F401
+    from app.models.exchange_rate import ExchangeRate  # noqa: F401
 
     # Schema should be managed by Alembic. For local/dev-only convenience you can enable:
     # AUTO_CREATE_TABLES=true

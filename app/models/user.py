@@ -36,6 +36,16 @@ class User(Base):
         index=True
     )
 
+    base_currency = Column(
+        String(3),
+        nullable=True
+    )
+
+    timezone = Column(
+        String(64),
+        nullable=True
+    )
+
     # Timestamps for record management
     created_at = Column(
         DateTime(timezone=True),

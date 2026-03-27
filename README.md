@@ -51,15 +51,53 @@ Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services
 - `users`
   - `id` UUID (coincide con `auth.users.id` via claim `sub`).
   - `email` unico.
-  - `name`, timestamps y `deleted_at`.
+  - `name`, `base_currency`, `timezone`, timestamps y `deleted_at`.
 - `categories`
   - pertenece a `user_id`.
   - soporte de jerarquia por `parent_id`.
   - `direction`: `income` o `expense`.
+  - no se puede borrar si aun tiene subcategorias o transacciones asociadas.
 - `transactions`
   - pertenece a `user_id`.
   - referencia `category_id`.
   - `amount`, `currency`, `occurred_at`.
+  - snapshot FX persistido: `fx_rate`, `fx_rate_date`, `fx_rate_source`, `base_currency`, `amount_in_base_currency`.
+- `exchange_rates`
+  - tabla global de tasas historicas entre pares de monedas.
+  - lookup por `base_currency`, `quote_currency`, `rate_date`, `source`.
+
+## Perfil monetario y politica FX
+
+- Cada usuario define una sola `base_currency` en su perfil. Esa es la moneda canonica de analytics.
+- `timezone` tambien vive en perfil y se usa para cortes mensuales en analytics.
+- Si el usuario ya tiene transacciones y su `base_currency` ya estaba definida, no puede cambiarla.
+- El producto actual opera monomoneda: las transacciones nuevas deben usar la misma moneda que `user.base_currency`.
+- Si el usuario viene de datos legacy sin `base_currency`, la primera asignacion puede disparar backfill de snapshots FX historicos.
+- Cada transaccion conserva su `amount` y `currency` originales, pero tambien guarda el snapshot de conversion hacia `user.base_currency`.
+- Si la moneda original y la base son iguales, el snapshot usa tasa identidad (`fx_rate = 1`, `fx_rate_source = "identity"`).
+- Si son distintas, se busca una tasa historica en `exchange_rates`.
+- Fallback por fecha: primero tasa exacta del dia; si no existe, la mas reciente anterior dentro de 7 dias; si tampoco existe, se intenta el par inverso; si sigue faltando, la transaccion queda sin `amount_in_base_currency`.
+- Regla dura: ningun agregado mezcla montos crudos de distintas monedas. La arquitectura FX queda preparada, pero el contrato actual de producto evita ese caso obligando transacciones en moneda base.
+
+## Reglas de producto vigentes
+
+- Dinerance opera como producto monomoneda.
+- Cada usuario trabaja con una sola `base_currency`.
+- Toda transaccion nueva debe usar `user.base_currency`.
+- `base_currency` y `timezone` se resuelven en onboarding y luego viven en perfil.
+- Ningun agregado puede mezclar montos crudos de distintas monedas.
+- Si existen datos legacy no convertibles, se excluyen del agregado y se informa; no se mezclan silenciosamente.
+- `exchange_rates` y los snapshots FX son infraestructura interna de compatibilidad y evolucion futura, no un flujo visible de producto.
+
+## Analytics
+
+- `app/analytics/` concentra calculos reutilizables y deja de depender de `SUM(amount)` SQL directo.
+- El balance mensual ahora:
+  - agrupa por mes usando `user.timezone`.
+  - suma solo `amount_in_base_currency`.
+  - devuelve la moneda del agregado sin mezclar montos crudos.
+  - trata timestamps sin timezone como UTC para mantener consistencia entre SQLite de tests y Postgres.
+- Esto deja la base preparada para futuros analytics y para reactivar conversiones multi-moneda sin repetir reglas.
 
 ## Seguridad y avisos de Supabase
 
@@ -189,6 +227,7 @@ curl -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me
   - `9c2df3d91a7a_enable_rls_on_public_tables.py` -> seguridad RLS/policies.
   - `c1a2d3e4f5a6_add_policy_to_alembic_version.py` -> policy para `alembic_version`.
   - `31f4e8d7c2ab_enable_rls_on_alembic_version.py` -> activa RLS en `public.alembic_version` para evitar warning de Supabase.
+  - `a9f1c3d4e5b6_add_user_money_profile_and_fx_snapshots.py` -> agrega `base_currency`, `timezone`, snapshots FX en transacciones y tabla `exchange_rates`.
 
 ## Pruebas
 
