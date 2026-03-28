@@ -43,6 +43,7 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
 5. `POST /users/me/bootstrap` crea el perfil local la primera vez (o sincroniza email/nombre si ya existe).
 6. `GET /users/me` devuelve el perfil activo y mantiene el email sincronizado con Auth.
 7. `categories` y `transactions` siempre operan filtrando por `user_id`.
+8. `DELETE /users/me` elimina el perfil local y los datos de dominio; si el usuario vuelve a iniciar sesion, puede bootstrapear un perfil nuevo.
 
 Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services), y ahora tambien se refuerza a nivel DB con RLS.
 
@@ -51,7 +52,7 @@ Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services
 - `users`
   - `id` UUID (coincide con `auth.users.id` via claim `sub`).
   - `email` unico.
-  - `name`, `base_currency`, `timezone`, timestamps y `deleted_at`.
+  - `name`, `base_currency`, `timezone` y timestamps.
 - `categories`
   - pertenece a `user_id`.
   - soporte de jerarquia por `parent_id`.
@@ -79,6 +80,7 @@ Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services
 - Si son distintas, se busca una tasa historica en `exchange_rates`.
 - Fallback por fecha: primero tasa exacta del dia; si no existe, la mas reciente anterior dentro de 7 dias; si tampoco existe, se intenta el par inverso; si sigue faltando, la transaccion queda sin `amount_in_base_currency`.
 - Regla dura: ningun agregado mezcla montos crudos de distintas monedas. La arquitectura FX queda preparada, pero el contrato actual de producto evita ese caso obligando transacciones en moneda base.
+- Si el usuario elimina sus datos en Dinerance, el perfil local se purga por completo; un login futuro crea un perfil nuevo mediante bootstrap.
 
 ## Reglas de producto vigentes
 
@@ -230,6 +232,8 @@ curl -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me
   - `c1a2d3e4f5a6_add_policy_to_alembic_version.py` -> policy para `alembic_version`.
   - `31f4e8d7c2ab_enable_rls_on_alembic_version.py` -> activa RLS en `public.alembic_version` para evitar warning de Supabase.
   - `a9f1c3d4e5b6_add_user_money_profile_and_fx_snapshots.py` -> agrega `base_currency`, `timezone`, snapshots FX en transacciones y tabla `exchange_rates`.
+  - `f7c9a12b4d3e_enforce_positive_transaction_amount.py` -> obliga `amount > 0` en transacciones.
+  - `9ed2333b023d_merge_positive_transaction_amount_head.py` -> merge revision para dejar una sola cabeza en Alembic.
 
 ## Pruebas
 

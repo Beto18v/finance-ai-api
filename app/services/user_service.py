@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -57,9 +56,8 @@ def _claim_name(claims: dict[str, Any]) -> str | None:
 
 def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
     user: User | None = db.query(User).filter(User.id == user_id).first()
+    user = _purge_legacy_deleted_user(db, user)
     if user:
-        if user.deleted_at is not None:
-            user.deleted_at = None
         update_data = user_data.model_dump(exclude_unset=True)
         if "email" in update_data and update_data["email"] is not None:
             update_data["email"] = str(update_data["email"])
@@ -90,8 +88,12 @@ def get_current_active_user_from_claims(
     user_id: UUID,
     claims: dict[str, Any],
 ) -> User:
-    user: User | None = db.query(User).filter(User.id == user_id).first()
-    if not user or user.deleted_at is not None:
+    user: User | None = (
+        db.query(User)
+        .filter(User.id == user_id, User.deleted_at.is_(None))
+        .first()
+    )
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     email = _claim_email(claims)
@@ -135,8 +137,7 @@ def bootstrap_current_user(
     user_data: UserBootstrap | None = None,
 ) -> User:
     user: User | None = db.query(User).filter(User.id == user_id).first()
-    if user and user.deleted_at is not None:
-        raise HTTPException(status_code=409, detail="User account has been deleted")
+    user = _purge_legacy_deleted_user(db, user)
 
     email = _claim_email(claims)
     if not email:
@@ -180,15 +181,19 @@ def bootstrap_current_user(
     return user
 
 
-def soft_delete_current_user(db: Session, user_id: UUID) -> None:
-    user: User | None = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+def delete_current_user(db: Session, user_id: UUID) -> None:
+    user: User | None = (
+        db.query(User)
+        .filter(User.id == user_id, User.deleted_at.is_(None))
+        .first()
+    )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Delete all user-owned data regardless of amount.
+    # Purge all local data so a future bootstrap can recreate a clean profile.
     _ = db.query(Transaction).filter(Transaction.user_id == user_id).delete(synchronize_session=False)
     _ = db.query(Category).filter(Category.user_id == user_id).delete(synchronize_session=False)
-    user.deleted_at = datetime.now(timezone.utc)
+    db.delete(user)
     db.commit()
 
 
@@ -248,3 +253,12 @@ def _user_has_transactions(db: Session, user_id: UUID) -> bool:
         .first()
         is not None
     )
+
+
+def _purge_legacy_deleted_user(db: Session, user: User | None) -> User | None:
+    if user and user.deleted_at is not None:
+        db.delete(user)
+        db.flush()
+        return None
+
+    return user

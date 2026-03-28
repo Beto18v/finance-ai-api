@@ -7,8 +7,8 @@ from app.schemas.user import UserBootstrap, UserCreate, UserRead, UserUpdate
 from app.services.user_service import (
     bootstrap_current_user,
     create_user,
+    delete_current_user,
     get_current_active_user_from_claims,
-    soft_delete_current_user,
     update_current_user,
 )
 
@@ -57,5 +57,5 @@ def delete_me_endpoint(
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    soft_delete_current_user(db, user_id)
+    delete_current_user(db, user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -43,7 +43,7 @@ def test_bootstrap_prefers_explicit_name_and_updates_existing_profile(client):
     assert bootstrapped.json()["email"] == "test@example.com"
 
 
-def test_bootstrap_does_not_restore_deleted_profile(client):
+def test_bootstrap_recreates_profile_after_deleted_account(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
@@ -57,8 +57,10 @@ def test_bootstrap_does_not_restore_deleted_profile(client):
     assert deleted.status_code == 204
 
     bootstrapped = client.post("/users/me/bootstrap")
-    assert bootstrapped.status_code == 409
-    assert bootstrapped.json()["detail"] == "User account has been deleted"
+    assert bootstrapped.status_code == 200
+    assert bootstrapped.json()["id"] == created.json()["id"]
+    assert bootstrapped.json()["deleted_at"] is None
+    assert bootstrapped.json()["email"] == "test@example.com"
 
 
 def test_users_me_requires_existing_active_profile(client):
@@ -81,7 +83,7 @@ def test_users_me_requires_existing_active_profile(client):
     assert data["email"] == "test@example.com"
 
 
-def test_users_me_update_soft_delete_and_explicit_recreate(client):
+def test_users_me_update_hard_delete_and_explicit_recreate(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
@@ -137,7 +139,7 @@ def test_delete_account_purges_categories_and_transactions(client):
     missing = client.get("/users/me")
     assert missing.status_code == 404
 
-    recreated = create_configured_user(client, name="Again")
+    recreated = client.post("/users/me/bootstrap", json={"name": "Again"})
     assert recreated.status_code == 200
 
     categories = client.get("/categories/")
