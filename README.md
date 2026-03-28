@@ -72,6 +72,7 @@ Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services
 - `timezone` tambien vive en perfil y se usa para cortes mensuales en analytics.
 - Si el usuario ya tiene transacciones y su `base_currency` ya estaba definida, no puede cambiarla.
 - El producto actual opera monomoneda: las transacciones nuevas deben usar la misma moneda que `user.base_currency`.
+- Toda transaccion debe registrar un monto estrictamente positivo (`amount > 0`).
 - Si el usuario viene de datos legacy sin `base_currency`, la primera asignacion puede disparar backfill de snapshots FX historicos.
 - Cada transaccion conserva su `amount` y `currency` originales, pero tambien guarda el snapshot de conversion hacia `user.base_currency`.
 - Si la moneda original y la base son iguales, el snapshot usa tasa identidad (`fx_rate = 1`, `fx_rate_source = "identity"`).
@@ -84,6 +85,7 @@ Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services
 - Dinerance opera como producto monomoneda.
 - Cada usuario trabaja con una sola `base_currency`.
 - Toda transaccion nueva debe usar `user.base_currency`.
+- Toda transaccion nueva debe usar un `amount > 0`.
 - `base_currency` y `timezone` se resuelven en onboarding y luego viven en perfil.
 - Ningun agregado puede mezclar montos crudos de distintas monedas.
 - Si existen datos legacy no convertibles, se excluyen del agregado y se informa; no se mezclan silenciosamente.

@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy import (
     Column,
+    CheckConstraint,
     ForeignKey,
     String,
     Numeric,
@@ -96,6 +97,7 @@ class Transaction(Base):
     category = relationship("Category", back_populates="transactions")
 
     __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
         Index("idx_user_date", "user_id", "occurred_at"),
         Index("idx_user_category", "user_id", "category_id"),
     )

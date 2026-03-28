@@ -71,6 +71,29 @@ def test_create_and_list_transactions(client):
     assert len(listed.json()) >= 1
 
 
+def test_create_transaction_rejects_negative_amount(client):
+    create_configured_user(client)
+
+    category = client.post(
+        "/categories/",
+        json={"name": "Food", "direction": "expense", "parent_id": None},
+    )
+    assert category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "amount": "-25.00",
+            "currency": "COP",
+            "description": "Invalid",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 422
+    assert created.json()["detail"] == "Transaction amount must be greater than zero"
+
+
 def test_category_crud(client):
     create_configured_user(client)
 
@@ -291,6 +314,35 @@ def test_transaction_crud(client):
 
     missing = client.get(f"/transactions/{transaction_id}")
     assert missing.status_code == 404
+
+
+def test_update_transaction_rejects_zero_amount(client):
+    create_configured_user(client)
+
+    category = client.post(
+        "/categories/",
+        json={"name": "Transport", "direction": "expense", "parent_id": None},
+    )
+    assert category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "amount": "15.25",
+            "currency": "COP",
+            "description": "Taxi",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 200
+
+    updated = client.put(
+        f"/transactions/{created.json()['id']}",
+        json={"amount": "0.00"},
+    )
+    assert updated.status_code == 422
+    assert updated.json()["detail"] == "Transaction amount must be greater than zero"
 
 
 def test_delete_category_with_transactions_returns_conflict(client):

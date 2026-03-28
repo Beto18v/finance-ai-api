@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ def create_transaction(
     transaction_data: TransactionCreate,
 ):
     user = ensure_active_user(db, user_id)
+    _ensure_transaction_amount_is_positive(transaction_data.amount)
     _ensure_transaction_currency_matches_user_base_currency(
         user_base_currency=user.base_currency,
         transaction_currency=transaction_data.currency,
@@ -106,6 +108,9 @@ def update_transaction(
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
 
+    if "amount" in updates and updates["amount"] is not None:
+        _ensure_transaction_amount_is_positive(updates["amount"])
+
     for field, value in updates.items():
         setattr(transaction, field, value)
 
@@ -156,4 +161,12 @@ def _ensure_transaction_currency_matches_user_base_currency(
         raise HTTPException(
             status_code=409,
             detail="Transactions must use the user's base currency",
+        )
+
+
+def _ensure_transaction_amount_is_positive(amount: Decimal) -> None:
+    if amount <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Transaction amount must be greater than zero",
         )
