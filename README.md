@@ -34,7 +34,7 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
 - `main.py`
   - inicializacion de la app, routers, CORS, health endpoint.
 
-## Flujo de autenticacion y multitenancy
+## Flujo de autenticacion y aislamiento por usuario
 
 1. El cliente obtiene `access_token` en Supabase Auth.
 2. El backend recibe `Authorization: Bearer <token>`.
@@ -46,6 +46,8 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
 8. `DELETE /users/me` elimina el perfil local y los datos de dominio; si el usuario vuelve a iniciar sesion, puede bootstrapear un perfil nuevo.
 
 Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services), y ahora tambien se refuerza a nivel DB con RLS.
+
+Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas o contexto activo por cuenta. El producto actual sigue siendo single-account: una cuenta personal por usuario autenticado, con ownership de dominio resuelto por `user_id`.
 
 ## Modelo de datos (alto nivel)
 
@@ -217,6 +219,20 @@ curl http://127.0.0.1:8000/healthz
 curl -X POST -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me/bootstrap
 curl -H "Authorization: Bearer <access_token>" http://127.0.0.1:8000/users/me
 ```
+
+Seeder rapido de transacciones via API:
+
+```bash
+$env:DINERANCE_ACCESS_TOKEN="<supabase_access_token>"
+uv run python scripts/seed_transactions_via_api.py --base-url http://127.0.0.1:8000 --count 100 --days-back 90
+```
+
+Notas:
+
+- El script usa la API publica del backend; no inserta directo en la DB.
+- Si faltan categorias de ingreso o gasto, crea categorias base de desarrollo antes de sembrar.
+- Requiere un JWT real de Supabase Auth. El UUID del usuario no reemplaza ese token.
+- Usa automaticamente `user.base_currency`; si tu perfil aun no tiene moneda base configurada, el script falla con mensaje claro.
 
 ## Migrations (Alembic)
 
