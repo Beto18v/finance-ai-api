@@ -4,9 +4,14 @@ from fastapi import HTTPException
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from app.analytics import AnalyticsTransactionRow, build_monthly_balance_overview
+from app.analytics import (
+    AnalyticsTransactionRow,
+    MonthlyBalanceOverview,
+    build_monthly_balance_overview,
+)
 from app.models.category import Category, CategoryDirection
 from app.models.transaction import Transaction
+from app.models.user import User
 from app.services.user_service import ensure_active_user
 from app.schemas.balance import (
     BalanceMonthRead,
@@ -14,13 +19,13 @@ from app.schemas.balance import (
 )
 
 
-def get_balance_overview(
+def get_balance_overview_data(
     db: Session,
     user_id: UUID,
     *,
     year: int | None = None,
     month: int | None = None,
-) -> BalanceOverviewRead:
+) -> tuple[User, MonthlyBalanceOverview]:
     user = ensure_active_user(db, user_id)
     if not user.base_currency:
         raise HTTPException(
@@ -67,6 +72,21 @@ def get_balance_overview(
         month=month,
     )
 
+    return user, overview
+
+
+def get_balance_overview(
+    db: Session,
+    user_id: UUID,
+    *,
+    year: int | None = None,
+    month: int | None = None,
+) -> BalanceOverviewRead:
+    _, overview = get_balance_overview_data(db, user_id, year=year, month=month)
+    return serialize_balance_overview(overview)
+
+
+def serialize_balance_overview(overview: MonthlyBalanceOverview) -> BalanceOverviewRead:
     return BalanceOverviewRead(
         currency=overview.currency,
         current=BalanceMonthRead(

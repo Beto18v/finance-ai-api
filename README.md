@@ -103,6 +103,8 @@ Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas 
   - suma solo `amount_in_base_currency`.
   - devuelve la moneda del agregado sin mezclar montos crudos.
   - trata timestamps sin timezone como UTC para mantener consistencia entre SQLite de tests y Postgres.
+- `/balance/monthly` conserva el contrato base de serie historica mensual.
+- `/analytics/summary` reutiliza ese mismo agregado y le suma `recent_transactions` del mes resuelto para alimentar la UI sin duplicar reglas.
 - Esto deja la base preparada para futuros analytics y para reactivar conversiones multi-moneda sin repetir reglas.
 
 ## Seguridad y avisos de Supabase
