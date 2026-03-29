@@ -73,3 +73,32 @@ class TransactionRead(BaseModel):
         return assume_utc_if_naive(value)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TransactionAggregateTotal(BaseModel):
+    currency: str
+    amount: Decimal
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def validate_currency(cls, value: str) -> str:
+        normalized = validate_currency_code(value)
+        if normalized is None:
+            raise ValueError("Currency is required")
+        return normalized
+
+
+class TransactionListSummary(BaseModel):
+    active_categories_count: int
+    skipped_transactions: int = 0
+    income_totals: list[TransactionAggregateTotal]
+    expense_totals: list[TransactionAggregateTotal]
+    balance_totals: list[TransactionAggregateTotal]
+
+
+class TransactionListPage(BaseModel):
+    items: list[TransactionRead]
+    total_count: int
+    limit: int
+    offset: int
+    summary: TransactionListSummary

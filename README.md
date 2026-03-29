@@ -28,7 +28,7 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
   - logica de negocio por recurso (usuarios, categorias, transacciones).
   - todas las funciones reciben `user_id: UUID` tipado para consistencia.
   - no llaman `db.add()` en objetos ya rastreados por la sesion; solo `db.commit()`.
-  - `list_transactions()` centraliza filtros (categoria, rango de fechas, limit/offset).
+  - `list_transactions()` centraliza filtros (categoria, categoria padre, rango de fechas, limit/offset) y devuelve pagina + resumen agregado del filtro actual.
 - `routes/`
   - endpoints HTTP que acoplan auth + schemas + services.
 - `main.py`
@@ -106,6 +106,19 @@ Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas 
 - `/balance/monthly` conserva el contrato base de serie historica mensual.
 - `/analytics/summary` reutiliza ese mismo agregado y le suma `recent_transactions` del mes resuelto para alimentar la UI sin duplicar reglas.
 - Esto deja la base preparada para futuros analytics y para reactivar conversiones multi-moneda sin repetir reglas.
+
+## Contrato de `/transactions`
+
+- `GET /transactions/` ya no devuelve `list[TransactionRead]`.
+- El contrato actual es paginado y responde con:
+  - `items`: transacciones de la pagina solicitada.
+  - `total_count`, `limit`, `offset`: metadata para paginacion server-side.
+  - `summary`: agregados del conjunto filtrado completo (`active_categories_count`, `skipped_transactions`, `income_totals`, `expense_totals`, `balance_totals`).
+- Filtros soportados:
+  - `category_id`
+  - `parent_category_id` (incluye la categoria padre y sus hijas)
+  - `start_date`
+  - `end_date`
 
 ## Seguridad y avisos de Supabase
 

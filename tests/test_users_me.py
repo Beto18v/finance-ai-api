@@ -148,4 +148,16 @@ def test_delete_account_purges_categories_and_transactions(client):
 
     transactions = client.get("/transactions/")
     assert transactions.status_code == 200
-    assert transactions.json() == []
+    assert transactions.json() == {
+        "items": [],
+        "total_count": 0,
+        "limit": 50,
+        "offset": 0,
+        "summary": {
+            "active_categories_count": 0,
+            "skipped_transactions": 0,
+            "income_totals": [],
+            "expense_totals": [],
+            "balance_totals": [],
+        },
+    }

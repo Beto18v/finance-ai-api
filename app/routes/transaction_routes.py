@@ -5,7 +5,12 @@ from datetime import datetime
 
 from app.core.auth import get_current_user_id
 from app.database.session import get_db
-from app.schemas.transaction import TransactionCreate, TransactionRead, TransactionUpdate
+from app.schemas.transaction import (
+    TransactionCreate,
+    TransactionListPage,
+    TransactionRead,
+    TransactionUpdate,
+)
 from app.services.transaction_service import (
     create_transaction,
     delete_transaction,
@@ -27,25 +32,28 @@ def create_transaction_endpoint(
     ensure_active_user(db, user_id)
     return create_transaction(db, user_id, transaction_data)
 
-@router.get("/", response_model=list[TransactionRead])
+@router.get("/", response_model=TransactionListPage)
 def get_transactions_endpoint(
     user_id=Depends(get_current_user_id),
     category_id: UUID | None = None,
+    parent_category_id: UUID | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db)
 ):
-    ensure_active_user(db, user_id)
+    user = ensure_active_user(db, user_id)
     return list_transactions(
         db,
         user_id,
         category_id=category_id,
+        parent_category_id=parent_category_id,
         start_date=start_date,
         end_date=end_date,
         limit=limit,
         offset=offset,
+        user_base_currency=user.base_currency,
     )
 
 

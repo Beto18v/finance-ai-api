@@ -67,8 +67,130 @@ def test_create_and_list_transactions(client):
 
     listed = client.get("/transactions/")
     assert listed.status_code == 200
-    assert isinstance(listed.json(), list)
-    assert len(listed.json()) >= 1
+    assert listed.json() == {
+        "items": [
+            {
+                "id": listed.json()["items"][0]["id"],
+                "category_id": cat["id"],
+                "amount": "25.00",
+                "currency": "COP",
+                "fx_rate": "1.00000000",
+                "fx_rate_date": listed.json()["items"][0]["fx_rate_date"],
+                "fx_rate_source": "identity",
+                "base_currency": "COP",
+                "amount_in_base_currency": "25.00",
+                "description": "Lunch",
+                "occurred_at": listed.json()["items"][0]["occurred_at"],
+                "created_at": listed.json()["items"][0]["created_at"],
+            }
+        ],
+        "total_count": 1,
+        "limit": 50,
+        "offset": 0,
+        "summary": {
+            "active_categories_count": 1,
+            "skipped_transactions": 0,
+            "income_totals": [],
+            "expense_totals": [{"currency": "COP", "amount": "25.00"}],
+            "balance_totals": [{"currency": "COP", "amount": "-25.00"}],
+        },
+    }
+
+
+def test_list_transactions_supports_parent_category_date_filters_and_pagination(client):
+    create_configured_user(client)
+
+    parent = client.post(
+        "/categories/",
+        json={"name": "Home", "direction": "expense", "parent_id": None},
+    )
+    assert parent.status_code == 200
+
+    child = client.post(
+        "/categories/",
+        json={
+            "name": "Groceries",
+            "direction": "expense",
+            "parent_id": parent.json()["id"],
+        },
+    )
+    assert child.status_code == 200
+
+    unrelated = client.post(
+        "/categories/",
+        json={"name": "Transport", "direction": "expense", "parent_id": None},
+    )
+    assert unrelated.status_code == 200
+
+    for payload in (
+        {
+            "category_id": parent.json()["id"],
+            "amount": "80.00",
+            "currency": "COP",
+            "description": "Rent",
+            "occurred_at": "2026-03-01T12:00:00Z",
+        },
+        {
+            "category_id": child.json()["id"],
+            "amount": "25.00",
+            "currency": "COP",
+            "description": "Market",
+            "occurred_at": "2026-03-05T12:00:00Z",
+        },
+        {
+            "category_id": child.json()["id"],
+            "amount": "15.00",
+            "currency": "COP",
+            "description": "Old market",
+            "occurred_at": "2026-02-27T12:00:00Z",
+        },
+        {
+            "category_id": unrelated.json()["id"],
+            "amount": "10.00",
+            "currency": "COP",
+            "description": "Bus",
+            "occurred_at": "2026-03-06T12:00:00Z",
+        },
+    ):
+        created = client.post("/transactions/", json=payload)
+        assert created.status_code == 200
+
+    listed = client.get(
+        f"/transactions/?parent_category_id={parent.json()['id']}"
+        "&start_date=2026-03-01T00:00:00Z"
+        "&end_date=2026-03-31T23:59:59Z"
+        "&limit=1"
+        "&offset=1"
+    )
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "items": [
+            {
+                "id": listed.json()["items"][0]["id"],
+                "category_id": parent.json()["id"],
+                "amount": "80.00",
+                "currency": "COP",
+                "fx_rate": "1.00000000",
+                "fx_rate_date": listed.json()["items"][0]["fx_rate_date"],
+                "fx_rate_source": "identity",
+                "base_currency": "COP",
+                "amount_in_base_currency": "80.00",
+                "description": "Rent",
+                "occurred_at": "2026-03-01T12:00:00Z",
+                "created_at": listed.json()["items"][0]["created_at"],
+            }
+        ],
+        "total_count": 2,
+        "limit": 1,
+        "offset": 1,
+        "summary": {
+            "active_categories_count": 2,
+            "skipped_transactions": 0,
+            "income_totals": [],
+            "expense_totals": [{"currency": "COP", "amount": "105.00"}],
+            "balance_totals": [{"currency": "COP", "amount": "-105.00"}],
+        },
+    }
 
 
 def test_create_transaction_rejects_negative_amount(client):
