@@ -41,6 +41,8 @@ def get_transactions_endpoint(
     end_date: datetime | None = None,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    include_total_count: bool = Query(True),
+    include_summary: bool = Query(True),
     db: Session = Depends(get_db)
 ):
     user = ensure_active_user(db, user_id)
@@ -54,6 +56,8 @@ def get_transactions_endpoint(
         limit=limit,
         offset=offset,
         user_base_currency=user.base_currency,
+        include_total_count=include_total_count,
+        include_summary=include_summary,
     )
 
 

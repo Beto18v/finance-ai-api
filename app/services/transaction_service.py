@@ -88,6 +88,8 @@ def list_transactions(
     limit: int = 50,
     offset: int = 0,
     user_base_currency: str | None = None,
+    include_total_count: bool = True,
+    include_summary: bool = True,
 ) -> TransactionListPage:
     query = _build_transactions_query(
         db,
@@ -97,7 +99,11 @@ def list_transactions(
         start_date=start_date,
         end_date=end_date,
     )
-    total_count = query.with_entities(func.count(Transaction.id)).scalar() or 0
+    total_count = (
+        int(query.with_entities(func.count(Transaction.id)).scalar() or 0)
+        if include_total_count
+        else None
+    )
     items = (
         query.order_by(
             Transaction.occurred_at.desc(),
@@ -111,12 +117,16 @@ def list_transactions(
 
     return TransactionListPage(
         items=items,
-        total_count=int(total_count),
+        total_count=total_count,
         limit=limit,
         offset=offset,
-        summary=_build_transactions_summary(
-            query=query,
-            user_base_currency=user_base_currency,
+        summary=(
+            _build_transactions_summary(
+                query=query,
+                user_base_currency=user_base_currency,
+            )
+            if include_summary
+            else None
         ),
     )
 

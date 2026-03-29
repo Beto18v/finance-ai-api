@@ -193,6 +193,57 @@ def test_list_transactions_supports_parent_category_date_filters_and_pagination(
     }
 
 
+def test_list_transactions_can_skip_total_count_and_summary_for_lightweight_pages(client):
+    create_configured_user(client)
+
+    category = client.post(
+        "/categories/",
+        json={"name": "Food", "direction": "expense", "parent_id": None},
+    )
+    assert category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "amount": "25.00",
+            "currency": "COP",
+            "description": "Lunch",
+            "occurred_at": "2026-03-05T12:00:00Z",
+        },
+    )
+    assert created.status_code == 200
+
+    listed = client.get(
+        "/transactions/?limit=1&offset=0"
+        "&include_total_count=false"
+        "&include_summary=false"
+    )
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "items": [
+            {
+                "id": created.json()["id"],
+                "category_id": category.json()["id"],
+                "amount": "25.00",
+                "currency": "COP",
+                "fx_rate": "1.00000000",
+                "fx_rate_date": created.json()["fx_rate_date"],
+                "fx_rate_source": "identity",
+                "base_currency": "COP",
+                "amount_in_base_currency": "25.00",
+                "description": "Lunch",
+                "occurred_at": "2026-03-05T12:00:00Z",
+                "created_at": created.json()["created_at"],
+            }
+        ],
+        "total_count": None,
+        "limit": 1,
+        "offset": 0,
+        "summary": None,
+    }
+
+
 def test_create_transaction_rejects_negative_amount(client):
     create_configured_user(client)
 

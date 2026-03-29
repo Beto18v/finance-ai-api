@@ -98,7 +98,7 @@ class TransactionListSummary(BaseModel):
 
 class TransactionListPage(BaseModel):
     items: list[TransactionRead]
-    total_count: int
+    total_count: int | None = None
     limit: int
     offset: int
-    summary: TransactionListSummary
+    summary: TransactionListSummary | None = None

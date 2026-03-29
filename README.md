@@ -114,6 +114,10 @@ Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas 
   - `items`: transacciones de la pagina solicitada.
   - `total_count`, `limit`, `offset`: metadata para paginacion server-side.
   - `summary`: agregados del conjunto filtrado completo (`active_categories_count`, `skipped_transactions`, `income_totals`, `expense_totals`, `balance_totals`).
+- Para cambios de pagina livianos, el endpoint tambien acepta:
+  - `include_total_count=false`
+  - `include_summary=false`
+- Con esos flags, la respuesta mantiene `items`, `limit` y `offset`, pero puede devolver `total_count=null` y `summary=null` para evitar recalculos pesados cuando el filtro no cambio.
 - Filtros soportados:
   - `category_id`
   - `parent_category_id` (incluye la categoria padre y sus hijas)
