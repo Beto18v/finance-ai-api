@@ -105,6 +105,7 @@ Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas 
   - trata timestamps sin timezone como UTC para mantener consistencia entre SQLite de tests y Postgres.
 - `/balance/monthly` conserva el contrato base de serie historica mensual.
 - `/analytics/summary` reutiliza ese mismo agregado y le suma `recent_transactions` del mes resuelto para alimentar la UI sin duplicar reglas.
+- `/analytics/category-breakdown` reutiliza esas mismas reglas para devolver el total del mes, porcentajes y breakdown por categoria, con filtro opcional por `direction`.
 - Esto deja la base preparada para futuros analytics y para reactivar conversiones multi-moneda sin repetir reglas.
 
 ## Contrato de `/transactions`

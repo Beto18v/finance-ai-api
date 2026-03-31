@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -28,3 +28,21 @@ class AnalyticsSummaryTransactionRead(BaseModel):
 
 class AnalyticsSummaryRead(BalanceOverviewRead):
     recent_transactions: list[AnalyticsSummaryTransactionRead]
+
+
+class AnalyticsCategoryBreakdownItemRead(BaseModel):
+    category_id: UUID
+    category_name: str
+    direction: str
+    amount: Decimal
+    percentage: Decimal
+    transaction_count: int
+
+
+class AnalyticsCategoryBreakdownRead(BaseModel):
+    month_start: date
+    currency: str | None = None
+    direction: str | None = None
+    total: Decimal
+    skipped_transactions: int = 0
+    breakdown: list[AnalyticsCategoryBreakdownItemRead]

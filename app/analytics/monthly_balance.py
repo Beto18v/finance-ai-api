@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from uuid import UUID
 
 from app.core.finance import assume_utc_if_naive, get_timezone
-
-MONEY_QUANTIZER = Decimal("0.01")
+from app.analytics.common import get_transaction_issue_reason, normalize_money, resolve_month_start
 
 
 @dataclass(slots=True)
@@ -56,14 +55,15 @@ def build_monthly_balance_overview(
     year: int | None = None,
     month: int | None = None,
 ) -> MonthlyBalanceOverview:
-    timezone = get_timezone(timezone_name)
     month_buckets: dict[tuple[int, int], dict[str, Decimal | date | int | str | None]] = {}
     missing_conversions: list[MonthlyBalanceIssue] = []
 
     for row in rows:
+        month_start = resolve_month_start(
+            occurred_at=row.occurred_at,
+            timezone_name=timezone_name,
+        )
         occurred_at = assume_utc_if_naive(row.occurred_at)
-        local_occurred_at = occurred_at.astimezone(timezone)
-        month_start = date(local_occurred_at.year, local_occurred_at.month, 1)
         bucket_key = (month_start.year, month_start.month)
         bucket = month_buckets.setdefault(
             bucket_key,
@@ -76,7 +76,11 @@ def build_monthly_balance_overview(
             },
         )
 
-        issue_reason = _get_issue_reason(row, base_currency)
+        issue_reason = get_transaction_issue_reason(
+            amount_in_base_currency=row.amount_in_base_currency,
+            snapshot_base_currency=row.base_currency,
+            expected_base_currency=base_currency,
+        )
         if issue_reason:
             bucket["skipped_transactions"] = int(bucket["skipped_transactions"]) + 1
             missing_conversions.append(
@@ -91,11 +95,11 @@ def build_monthly_balance_overview(
             )
             continue
 
-        amount = _normalize_money(row.amount_in_base_currency or Decimal("0"))
+        amount = normalize_money(row.amount_in_base_currency or Decimal("0"))
         if row.direction == "income":
-            bucket["income"] = _normalize_money(Decimal(bucket["income"]) + amount)
+            bucket["income"] = normalize_money(Decimal(bucket["income"]) + amount)
         elif row.direction == "expense":
-            bucket["expense"] = _normalize_money(Decimal(bucket["expense"]) + amount)
+            bucket["expense"] = normalize_money(Decimal(bucket["expense"]) + amount)
         else:
             bucket["skipped_transactions"] = int(bucket["skipped_transactions"]) + 1
             missing_conversions.append(
@@ -129,7 +133,7 @@ def build_monthly_balance_overview(
             year = series[0].month_start.year
             month = series[0].month_start.month
         else:
-            today = datetime.now(timezone).date()
+            today = datetime.now(get_timezone(timezone_name)).date()
             year = today.year
             month = today.month
 
@@ -158,19 +162,6 @@ def build_monthly_balance_overview(
     )
 
 
-def _get_issue_reason(
-    row: AnalyticsTransactionRow,
-    base_currency: str,
-) -> str | None:
-    if row.amount_in_base_currency is None:
-        return "missing_fx_rate"
-
-    if row.base_currency != base_currency:
-        return "snapshot_base_currency_mismatch"
-
-    return None
-
-
 def _build_month_result(
     *,
     month_start: date,
@@ -179,18 +170,14 @@ def _build_month_result(
     expense: Decimal,
     skipped_transactions: int,
 ) -> MonthlyBalanceMonth:
-    normalized_income = _normalize_money(income)
-    normalized_expense = _normalize_money(expense)
+    normalized_income = normalize_money(income)
+    normalized_expense = normalize_money(expense)
 
     return MonthlyBalanceMonth(
         month_start=month_start,
         currency=currency,
         income=normalized_income,
         expense=normalized_expense,
-        balance=_normalize_money(normalized_income - normalized_expense),
+        balance=normalize_money(normalized_income - normalized_expense),
         skipped_transactions=skipped_transactions,
     )
-
-
-def _normalize_money(value: Decimal | int | float) -> Decimal:
-    return Decimal(str(value)).quantize(MONEY_QUANTIZER, rounding=ROUND_HALF_UP)
