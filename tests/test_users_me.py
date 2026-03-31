@@ -43,7 +43,7 @@ def test_bootstrap_prefers_explicit_name_and_updates_existing_profile(client):
     assert bootstrapped.json()["email"] == "test@example.com"
 
 
-def test_bootstrap_recreates_profile_after_deleted_account(client):
+def test_bootstrap_reactivates_profile_after_soft_deleted_account(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
@@ -83,7 +83,7 @@ def test_users_me_requires_existing_active_profile(client):
     assert data["email"] == "test@example.com"
 
 
-def test_users_me_update_hard_delete_and_explicit_recreate(client):
+def test_users_me_update_soft_delete_and_bootstrap_reactivation(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
@@ -97,17 +97,34 @@ def test_users_me_update_hard_delete_and_explicit_recreate(client):
     deleted = client.delete("/users/me")
     assert deleted.status_code == 204
 
-    # Deleted users are not auto-restored by /users/me.
     missing = client.get("/users/me")
     assert missing.status_code == 404
 
+    reactivated = client.post("/users/me/bootstrap", json={"name": "Reactivated User"})
+    assert reactivated.status_code == 200
+    assert reactivated.json()["id"] == created.json()["id"]
+    assert reactivated.json()["deleted_at"] is None
+    assert reactivated.json()["name"] == "Reactivated User"
+
+
+def test_create_user_reactivates_soft_deleted_profile(client):
+    cleanup = client.delete("/users/me")
+    assert cleanup.status_code in (204, 404)
+
+    created = create_configured_user(client)
+    assert created.status_code == 200
+
+    deleted = client.delete("/users/me")
+    assert deleted.status_code == 204
+
     recreated = create_configured_user(client, name="Recreated User")
     assert recreated.status_code == 200
+    assert recreated.json()["id"] == created.json()["id"]
     assert recreated.json()["deleted_at"] is None
     assert recreated.json()["name"] == "Recreated User"
 
 
-def test_delete_account_purges_categories_and_transactions(client):
+def test_delete_account_preserves_categories_and_transactions_for_reactivation(client):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
@@ -139,25 +156,29 @@ def test_delete_account_purges_categories_and_transactions(client):
     missing = client.get("/users/me")
     assert missing.status_code == 404
 
-    recreated = client.post("/users/me/bootstrap", json={"name": "Again"})
-    assert recreated.status_code == 200
+    categories_while_deleted = client.get("/categories/")
+    assert categories_while_deleted.status_code == 404
+
+    reactivated = client.post("/users/me/bootstrap", json={"name": "Again"})
+    assert reactivated.status_code == 200
 
     categories = client.get("/categories/")
     assert categories.status_code == 200
-    assert categories.json() == []
+    categories_payload = categories.json()
+    assert len(categories_payload) == 1
+    assert categories_payload[0]["id"] == category_id
+    assert categories_payload[0]["name"] == "Food"
+    assert categories_payload[0]["direction"] == "expense"
+    assert categories_payload[0]["parent_id"] is None
 
     transactions = client.get("/transactions/")
     assert transactions.status_code == 200
-    assert transactions.json() == {
-        "items": [],
-        "total_count": 0,
-        "limit": 50,
-        "offset": 0,
-        "summary": {
-            "active_categories_count": 0,
-            "skipped_transactions": 0,
-            "income_totals": [],
-            "expense_totals": [],
-            "balance_totals": [],
-        },
+    assert transactions.json()["total_count"] == 1
+    assert len(transactions.json()["items"]) == 1
+    assert transactions.json()["summary"] == {
+        "active_categories_count": 1,
+        "skipped_transactions": 0,
+        "income_totals": [],
+        "expense_totals": [{"currency": "COP", "amount": "19.99"}],
+        "balance_totals": [{"currency": "COP", "amount": "-19.99"}],
     }

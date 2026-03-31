@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -5,7 +6,6 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.models.user import User
-from app.models.category import Category
 from app.models.transaction import Transaction
 from app.schemas.user import UserBootstrap, UserCreate, UserUpdate
 from app.services.exchange_rate_service import refresh_transaction_fx_snapshots_for_user
@@ -56,18 +56,19 @@ def _claim_name(claims: dict[str, Any]) -> str | None:
 
 def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
     user: User | None = db.query(User).filter(User.id == user_id).first()
-    user = _purge_legacy_deleted_user(db, user)
     if user:
         update_data = user_data.model_dump(exclude_unset=True)
         if "email" in update_data and update_data["email"] is not None:
             update_data["email"] = str(update_data["email"])
+        changed = _reactivate_user(user)
         _apply_user_updates(
             db,
             user,
             update_data,
         )
-        db.commit()
-        db.refresh(user)
+        if changed or update_data:
+            db.commit()
+            db.refresh(user)
         return user
 
     user = User(
@@ -137,7 +138,6 @@ def bootstrap_current_user(
     user_data: UserBootstrap | None = None,
 ) -> User:
     user: User | None = db.query(User).filter(User.id == user_id).first()
-    user = _purge_legacy_deleted_user(db, user)
 
     email = _claim_email(claims)
     if not email:
@@ -147,7 +147,7 @@ def bootstrap_current_user(
     fallback_name = _claim_name(claims) or DEFAULT_USER_NAME
 
     if user:
-        changed = False
+        changed = _reactivate_user(user)
 
         if user.email != email:
             user.email = email
@@ -190,10 +190,9 @@ def delete_current_user(db: Session, user_id: UUID) -> None:
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Purge all local data so a future bootstrap can recreate a clean profile.
-    _ = db.query(Transaction).filter(Transaction.user_id == user_id).delete(synchronize_session=False)
-    _ = db.query(Category).filter(Category.user_id == user_id).delete(synchronize_session=False)
-    db.delete(user)
+    # Soft delete the local profile. Domain data remain available for a future
+    # bootstrap/reactivation flow.
+    user.deleted_at = datetime.now(timezone.utc)
     db.commit()
 
 
@@ -255,10 +254,9 @@ def _user_has_transactions(db: Session, user_id: UUID) -> bool:
     )
 
 
-def _purge_legacy_deleted_user(db: Session, user: User | None) -> User | None:
-    if user and user.deleted_at is not None:
-        db.delete(user)
-        db.flush()
-        return None
+def _reactivate_user(user: User) -> bool:
+    if user.deleted_at is None:
+        return False
 
-    return user
+    user.deleted_at = None
+    return True

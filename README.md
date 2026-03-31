@@ -40,10 +40,10 @@ API backend para un SaaS de finanzas personales. Este documento esta escrito com
 2. El backend recibe `Authorization: Bearer <token>`.
 3. `app/core/auth.py` valida JWT (JWKS o secret legacy).
 4. Del claim `sub` sale el `user_id` canonico del sistema.
-5. `POST /users/me/bootstrap` crea el perfil local la primera vez (o sincroniza email/nombre si ya existe).
+5. `POST /users/me/bootstrap` crea el perfil local la primera vez, o reactiva/sincroniza el perfil si ya existia y estaba soft-deleted.
 6. `GET /users/me` devuelve el perfil activo y mantiene el email sincronizado con Auth.
 7. `categories` y `transactions` siempre operan filtrando por `user_id`.
-8. `DELETE /users/me` elimina el perfil local y los datos de dominio; si el usuario vuelve a iniciar sesion, puede bootstrapear un perfil nuevo.
+8. `DELETE /users/me` hace soft delete del perfil local (`deleted_at`); las categorias y transacciones quedan archivadas y vuelven a estar disponibles si el usuario rebootstrappea/inicia sesion otra vez.
 
 Idea clave: la aislacion por usuario ya existia a nivel API (filtros en services), y ahora tambien se refuerza a nivel DB con RLS.
 
@@ -82,7 +82,7 @@ Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas 
 - Si son distintas, se busca una tasa historica en `exchange_rates`.
 - Fallback por fecha: primero tasa exacta del dia; si no existe, la mas reciente anterior dentro de 7 dias; si tampoco existe, se intenta el par inverso; si sigue faltando, la transaccion queda sin `amount_in_base_currency`.
 - Regla dura: ningun agregado mezcla montos crudos de distintas monedas. La arquitectura FX queda preparada, pero el contrato actual de producto evita ese caso obligando transacciones en moneda base.
-- Si el usuario elimina sus datos en Dinerance, el perfil local se purga por completo; un login futuro crea un perfil nuevo mediante bootstrap.
+- Si el usuario desactiva su cuenta en Dinerance, el perfil local queda en soft delete; un login futuro reactiva ese mismo perfil mediante bootstrap y conserva sus datos de dominio.
 
 ## Reglas de producto vigentes
 
@@ -94,6 +94,7 @@ Importante: esto no significa que hoy existan `workspaces`, cuentas compartidas 
 - Ningun agregado puede mezclar montos crudos de distintas monedas.
 - Si existen datos legacy no convertibles, se excluyen del agregado y se informa; no se mezclan silenciosamente.
 - `exchange_rates` y los snapshots FX son infraestructura interna de compatibilidad y evolucion futura, no un flujo visible de producto.
+- El borrado expuesto hoy para cuenta es soft delete del usuario; no existe todavia un endpoint publico de purge irreversible.
 
 ## Analytics
 
