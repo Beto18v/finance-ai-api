@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import HTTPException
 from uuid import UUID
@@ -16,11 +16,18 @@ from app.analytics.common import (
     AGGREGATED_TRANSACTION_TYPES,
     resolve_month_utc_range,
 )
+from app.analytics.recurring_candidates import (
+    ANALYSIS_WINDOW_DAYS,
+    RecurringCandidateRow,
+    build_recurring_candidates,
+)
 from app.models.category import Category, CategoryDirection
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.analytics import (
     AnalyticsCategoryBreakdownItemRead,
     AnalyticsCategoryBreakdownRead,
+    AnalyticsRecurringCandidateRead,
+    AnalyticsRecurringCandidatesRead,
     AnalyticsSummaryRead,
     AnalyticsSummaryTransactionRead,
 )
@@ -150,6 +157,101 @@ def get_analytics_category_breakdown(
                 transaction_count=item.transaction_count,
             )
             for item in breakdown.breakdown
+        ],
+    )
+
+
+def get_analytics_recurring_candidates(
+    db: Session,
+    user_id: UUID,
+    *,
+    year: int,
+    month: int,
+    financial_account_id: UUID | None = None,
+) -> AnalyticsRecurringCandidatesRead:
+    user = ensure_active_user(db, user_id)
+
+    if financial_account_id is not None:
+        get_financial_account_for_user(db, user_id, financial_account_id)
+
+    month_start = date(year, month, 1)
+    analysis_window_start = month_start - timedelta(days=ANALYSIS_WINDOW_DAYS)
+    start_utc, _ = resolve_month_utc_range(
+        month_start=analysis_window_start,
+        timezone_name=user.timezone or "UTC",
+    )
+    _, end_utc = resolve_month_utc_range(
+        month_start=month_start,
+        timezone_name=user.timezone or "UTC",
+    )
+
+    filters = [
+        Transaction.user_id == user_id,
+        Category.user_id == user_id,
+        Transaction.occurred_at >= start_utc,
+        Transaction.occurred_at < end_utc,
+        Transaction.transaction_type.in_(AGGREGATED_TRANSACTION_TYPES),
+    ]
+    if financial_account_id is not None:
+        filters.append(Transaction.financial_account_id == financial_account_id)
+
+    rows = (
+        db.query(
+            Transaction.id,
+            Transaction.category_id,
+            Transaction.occurred_at,
+            Transaction.amount,
+            Transaction.currency,
+            Transaction.description,
+            Category.name.label("category_name"),
+            Transaction.transaction_type,
+        )
+        .join(Category, Transaction.category_id == Category.id)
+        .filter(and_(*filters))
+        .all()
+    )
+
+    overview = build_recurring_candidates(
+        [
+            RecurringCandidateRow(
+                transaction_id=row.id,
+                category_id=row.category_id,
+                category_name=row.category_name,
+                occurred_at=row.occurred_at,
+                amount=row.amount,
+                currency=row.currency,
+                description=row.description,
+                direction=_direction_to_text(row.transaction_type),
+            )
+            for row in rows
+        ],
+        month_start=month_start,
+        timezone_name=user.timezone or "UTC",
+    )
+
+    return AnalyticsRecurringCandidatesRead(
+        month_start=overview.month_start,
+        history_window_start=overview.history_window_start,
+        candidates=[
+            AnalyticsRecurringCandidateRead(
+                label=item.label,
+                description=item.description,
+                category_id=item.category_id,
+                category_name=item.category_name,
+                direction=item.direction,
+                cadence=item.cadence,
+                match_basis=item.match_basis,
+                amount_pattern=item.amount_pattern,
+                currency=item.currency,
+                typical_amount=item.typical_amount,
+                amount_min=item.amount_min,
+                amount_max=item.amount_max,
+                occurrence_count=item.occurrence_count,
+                interval_days=item.interval_days,
+                first_occurred_at=item.first_occurred_at,
+                last_occurred_at=item.last_occurred_at,
+            )
+            for item in overview.candidates
         ],
     )
 

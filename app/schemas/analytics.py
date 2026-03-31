@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
@@ -47,3 +48,33 @@ class AnalyticsCategoryBreakdownRead(BaseModel):
     total: Decimal
     skipped_transactions: int = 0
     breakdown: list[AnalyticsCategoryBreakdownItemRead]
+
+
+class AnalyticsRecurringCandidateRead(BaseModel):
+    label: str
+    description: str | None = None
+    category_id: UUID
+    category_name: str
+    direction: Literal["income", "expense"]
+    cadence: Literal["weekly", "biweekly", "monthly"]
+    match_basis: Literal["description", "category_amount"]
+    amount_pattern: Literal["exact", "stable"]
+    currency: str
+    typical_amount: Decimal
+    amount_min: Decimal
+    amount_max: Decimal
+    occurrence_count: int
+    interval_days: list[int]
+    first_occurred_at: datetime
+    last_occurred_at: datetime
+
+    @field_validator("first_occurred_at", "last_occurred_at", mode="before")
+    @classmethod
+    def validate_occurrence_datetimes(cls, value: datetime) -> datetime:
+        return assume_utc_if_naive(value)
+
+
+class AnalyticsRecurringCandidatesRead(BaseModel):
+    month_start: date
+    history_window_start: date
+    candidates: list[AnalyticsRecurringCandidateRead]

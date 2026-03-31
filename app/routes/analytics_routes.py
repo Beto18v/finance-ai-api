@@ -7,10 +7,12 @@ from app.database.session import get_db
 from app.models.category import CategoryDirection
 from app.schemas.analytics import (
     AnalyticsCategoryBreakdownRead,
+    AnalyticsRecurringCandidatesRead,
     AnalyticsSummaryRead,
 )
 from app.services.analytics_service import (
     get_analytics_category_breakdown,
+    get_analytics_recurring_candidates,
     get_analytics_summary,
 )
 from app.services.user_service import ensure_active_user
@@ -52,5 +54,23 @@ def get_analytics_category_breakdown_endpoint(
         year=year,
         month=month,
         direction=direction,
+        financial_account_id=financial_account_id,
+    )
+
+
+@router.get("/recurring-candidates", response_model=AnalyticsRecurringCandidatesRead)
+def get_analytics_recurring_candidates_endpoint(
+    year: int = Query(..., ge=1900, le=9999),
+    month: int = Query(..., ge=1, le=12),
+    financial_account_id: UUID | None = Query(None),
+    user_id=Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    ensure_active_user(db, user_id)
+    return get_analytics_recurring_candidates(
+        db,
+        user_id,
+        year=year,
+        month=month,
         financial_account_id=financial_account_id,
     )
