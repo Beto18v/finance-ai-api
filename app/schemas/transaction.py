@@ -10,10 +10,13 @@ from app.core.finance import (
     ensure_aware_datetime,
     validate_currency_code,
 )
+from app.models.transaction import TransactionType
 
 
 class TransactionCreate(BaseModel):
-    category_id: UUID
+    category_id: UUID | None = None
+    financial_account_id: UUID | None = None
+    transaction_type: TransactionType | None = None
     amount: Decimal
     currency: str = "COP"
     description: str | None = None
@@ -35,6 +38,8 @@ class TransactionCreate(BaseModel):
 
 class TransactionUpdate(BaseModel):
     category_id: UUID | None = None
+    financial_account_id: UUID | None = None
+    transaction_type: TransactionType | None = None
     amount: Decimal | None = None
     currency: str | None = None
     description: str | None = None
@@ -55,7 +60,10 @@ class TransactionUpdate(BaseModel):
 
 class TransactionRead(BaseModel):
     id: UUID
-    category_id: UUID
+    category_id: UUID | None = None
+    financial_account_id: UUID
+    transaction_type: TransactionType
+    transfer_group_id: UUID | None = None
     amount: Decimal
     currency: str
     fx_rate: Decimal | None = None

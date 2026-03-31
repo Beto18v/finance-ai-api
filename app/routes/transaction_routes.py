@@ -35,6 +35,7 @@ def create_transaction_endpoint(
 @router.get("/", response_model=TransactionListPage)
 def get_transactions_endpoint(
     user_id=Depends(get_current_user_id),
+    financial_account_id: UUID | None = None,
     category_id: UUID | None = None,
     parent_category_id: UUID | None = None,
     start_date: datetime | None = None,
@@ -49,6 +50,7 @@ def get_transactions_endpoint(
     return list_transactions(
         db,
         user_id,
+        financial_account_id=financial_account_id,
         category_id=category_id,
         parent_category_id=parent_category_id,
         start_date=start_date,

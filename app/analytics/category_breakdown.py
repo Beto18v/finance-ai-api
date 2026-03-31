@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from app.analytics.common import (
-    VALID_CATEGORY_DIRECTIONS,
+    AGGREGATED_TRANSACTION_DIRECTIONS,
     get_transaction_issue_reason,
     normalize_money,
     normalize_percentage,
@@ -62,9 +62,7 @@ def build_category_breakdown(
 
     for row in rows:
         row_direction = str(row.direction)
-        if row_direction not in VALID_CATEGORY_DIRECTIONS:
-            if requested_direction is None:
-                skipped_transactions += 1
+        if row_direction not in AGGREGATED_TRANSACTION_DIRECTIONS:
             continue
 
         if requested_direction and row_direction != requested_direction:

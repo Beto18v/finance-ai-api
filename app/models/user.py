@@ -70,6 +70,12 @@ class User(Base):
         "Transaction",
         back_populates="user"
     )
+
+    financial_accounts = relationship(
+        "FinancialAccount",
+        back_populates="user"
+    )
+
     # One-to-many relationship with categories, back_populates to allow bidirectional access
     categories = relationship(
         "Category",

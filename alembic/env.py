@@ -46,9 +46,10 @@ def _get_database_url() -> str:
 # Import models so SQLAlchemy registers them in Base.metadata
 from app.models.user import User
 from app.models.category import Category
+from app.models.financial_account import FinancialAccount
 from app.models.transaction import Transaction
 
-_ = (User, Category, Transaction)
+_ = (User, Category, FinancialAccount, Transaction)
 
 target_metadata = Base.metadata
 

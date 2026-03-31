@@ -2,12 +2,13 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy import and_, case, distinct, func, or_
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
 
-from app.models.transaction import Transaction
 from app.models.category import Category, CategoryDirection
+from app.models.financial_account import FinancialAccount
+from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import (
     TransactionAggregateTotal,
     TransactionCreate,
@@ -19,6 +20,10 @@ from app.services.exchange_rate_service import (
     apply_transaction_fx_snapshot,
     resolve_transaction_fx_snapshot,
 )
+from app.services.financial_account_service import (
+    ensure_default_financial_account,
+    get_financial_account_for_user,
+)
 from app.services.user_service import ensure_active_user
 
 
@@ -29,18 +34,31 @@ def create_transaction(
 ):
     user = ensure_active_user(db, user_id)
     _ensure_transaction_amount_is_positive(transaction_data.amount)
+
+    financial_account = _resolve_financial_account(
+        db,
+        user_id=user_id,
+        user=user,
+        financial_account_id=transaction_data.financial_account_id,
+    )
     _ensure_transaction_currency_matches_user_base_currency(
         user_base_currency=user.base_currency,
         transaction_currency=transaction_data.currency,
     )
+    _ensure_transaction_currency_matches_financial_account_currency(
+        financial_account=financial_account,
+        transaction_currency=transaction_data.currency,
+    )
 
-    category = db.query(Category).filter(
-        Category.id == transaction_data.category_id,
-        Category.user_id == user_id,
-    ).first()
-
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+    category = _get_category_for_user(
+        db,
+        user_id=user_id,
+        category_id=transaction_data.category_id,
+    )
+    transaction_type = _resolve_transaction_type(
+        category=category,
+        requested_type=transaction_data.transaction_type,
+    )
 
     snapshot = resolve_transaction_fx_snapshot(
         db,
@@ -52,11 +70,13 @@ def create_transaction(
 
     transaction = Transaction(
         user_id=user_id,
-        category_id=transaction_data.category_id,
+        financial_account_id=financial_account.id,
+        category_id=category.id if category else None,
+        transaction_type=transaction_type,
         amount=transaction_data.amount,
         currency=transaction_data.currency,
         description=transaction_data.description,
-        occurred_at=transaction_data.occurred_at
+        occurred_at=transaction_data.occurred_at,
     )
     apply_transaction_fx_snapshot(transaction, snapshot)
 
@@ -81,6 +101,7 @@ def list_transactions(
     db: Session,
     user_id: UUID,
     *,
+    financial_account_id: UUID | None = None,
     category_id: UUID | None = None,
     parent_category_id: UUID | None = None,
     start_date: datetime | None = None,
@@ -94,6 +115,7 @@ def list_transactions(
     query = _build_transactions_query(
         db,
         user_id,
+        financial_account_id=financial_account_id,
         category_id=category_id,
         parent_category_id=parent_category_id,
         start_date=start_date,
@@ -141,25 +163,64 @@ def update_transaction(
     transaction = get_transaction(db, user_id, transaction_id)
     updates = transaction_data.model_dump(exclude_unset=True)
 
-    if "category_id" in updates and updates["category_id"] is not None:
-        category = db.query(Category).filter(
-            Category.id == updates["category_id"],
-            Category.user_id == user_id,
-        ).first()
-        if not category:
-            raise HTTPException(status_code=404, detail="Category not found")
-
     if "amount" in updates and updates["amount"] is not None:
         _ensure_transaction_amount_is_positive(updates["amount"])
 
-    for field, value in updates.items():
-        setattr(transaction, field, value)
+    category_id = (
+        updates["category_id"]
+        if "category_id" in updates
+        else transaction.category_id
+    )
+    category = _get_category_for_user(
+        db,
+        user_id=user_id,
+        category_id=category_id,
+    )
+    requested_transaction_type = (
+        updates["transaction_type"]
+        if "transaction_type" in updates
+        else None
+        if "category_id" in updates
+        else transaction.transaction_type
+    )
+    transaction_type = _resolve_transaction_type(
+        category=category,
+        requested_type=requested_transaction_type,
+    )
 
-    if "currency" in updates:
-        _ensure_transaction_currency_matches_user_base_currency(
-            user_base_currency=user.base_currency,
-            transaction_currency=transaction.currency,
-        )
+    financial_account_id = (
+        updates["financial_account_id"]
+        if "financial_account_id" in updates
+        else transaction.financial_account_id
+    )
+    financial_account = _resolve_financial_account(
+        db,
+        user_id=user_id,
+        user=user,
+        financial_account_id=financial_account_id,
+    )
+
+    transaction.category_id = category.id if category else None
+    transaction.transaction_type = transaction_type
+    transaction.financial_account_id = financial_account.id
+
+    for field in (
+        "amount",
+        "currency",
+        "description",
+        "occurred_at",
+    ):
+        if field in updates:
+            setattr(transaction, field, updates[field])
+
+    _ensure_transaction_currency_matches_user_base_currency(
+        user_base_currency=user.base_currency,
+        transaction_currency=transaction.currency,
+    )
+    _ensure_transaction_currency_matches_financial_account_currency(
+        financial_account=financial_account,
+        transaction_currency=transaction.currency,
+    )
 
     needs_fx_refresh = any(
         field in updates for field in ("amount", "currency", "occurred_at")
@@ -205,6 +266,21 @@ def _ensure_transaction_currency_matches_user_base_currency(
         )
 
 
+def _ensure_transaction_currency_matches_financial_account_currency(
+    *,
+    financial_account: FinancialAccount,
+    transaction_currency: str,
+) -> None:
+    if (
+        financial_account.currency is not None
+        and transaction_currency != financial_account.currency
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Transactions must use the financial account currency",
+        )
+
+
 def _ensure_transaction_amount_is_positive(amount: Decimal) -> None:
     if amount <= 0:
         raise HTTPException(
@@ -217,6 +293,7 @@ def _build_transactions_query(
     db: Session,
     user_id: UUID,
     *,
+    financial_account_id: UUID | None = None,
     category_id: UUID | None = None,
     parent_category_id: UUID | None = None,
     start_date: datetime | None = None,
@@ -224,15 +301,20 @@ def _build_transactions_query(
 ):
     query = (
         db.query(Transaction)
-        .join(Category, Transaction.category_id == Category.id)
-        .filter(
-            Transaction.user_id == user_id,
-            Category.user_id == user_id,
+        .outerjoin(
+            Category,
+            and_(
+                Transaction.category_id == Category.id,
+                Category.user_id == user_id,
+            ),
         )
+        .filter(Transaction.user_id == user_id)
     )
 
     if category_id:
         query = query.filter(Transaction.category_id == category_id)
+    if financial_account_id:
+        query = query.filter(Transaction.financial_account_id == financial_account_id)
     if parent_category_id:
         query = query.filter(
             or_(
@@ -295,7 +377,7 @@ def _build_base_currency_summary(
                     case(
                         (
                             and_(
-                                Category.direction == CategoryDirection.income,
+                                Transaction.transaction_type == TransactionType.income,
                                 usable_amount.isnot(None),
                             ),
                             usable_amount,
@@ -314,7 +396,7 @@ def _build_base_currency_summary(
                     case(
                         (
                             and_(
-                                Category.direction == CategoryDirection.expense,
+                                Transaction.transaction_type == TransactionType.expense,
                                 usable_amount.isnot(None),
                             ),
                             usable_amount,
@@ -330,7 +412,18 @@ def _build_base_currency_summary(
         query.with_entities(
             func.count(
                 case(
-                    (usable_amount.isnot(None), 1),
+                    (
+                        and_(
+                            usable_amount.isnot(None),
+                            Transaction.transaction_type.in_(
+                                [
+                                    TransactionType.income,
+                                    TransactionType.expense,
+                                ]
+                            ),
+                        ),
+                        1,
+                    ),
                     else_=None,
                 )
             )
@@ -344,10 +437,10 @@ def _build_base_currency_summary(
                     (
                         and_(
                             usable_amount.is_(None),
-                            Category.direction.in_(
+                            Transaction.transaction_type.in_(
                                 [
-                                    CategoryDirection.income,
-                                    CategoryDirection.expense,
+                                    TransactionType.income,
+                                    TransactionType.expense,
                                 ]
                             ),
                         ),
@@ -397,23 +490,28 @@ def _build_multi_currency_summary(
 ) -> TransactionListSummary:
     grouped_totals = query.with_entities(
         Transaction.currency,
-        Category.direction,
+        Transaction.transaction_type,
         func.coalesce(func.sum(Transaction.amount), 0),
-    ).group_by(Transaction.currency, Category.direction)
+    ).group_by(Transaction.currency, Transaction.transaction_type)
 
     income_totals: dict[str, Decimal] = {}
     expense_totals: dict[str, Decimal] = {}
     balance_totals: dict[str, Decimal] = {}
 
-    for currency, direction, amount in grouped_totals.all():
+    for currency, transaction_type, amount in grouped_totals.all():
         normalized_amount = _normalize_decimal(amount)
+        normalized_type = _normalize_transaction_type(transaction_type)
 
-        if direction == CategoryDirection.income:
+        if normalized_type == TransactionType.income:
             income_totals[currency] = normalized_amount
-            balance_totals[currency] = balance_totals.get(currency, Decimal("0")) + normalized_amount
-        elif direction == CategoryDirection.expense:
+            balance_totals[currency] = (
+                balance_totals.get(currency, Decimal("0")) + normalized_amount
+            )
+        elif normalized_type == TransactionType.expense:
             expense_totals[currency] = normalized_amount
-            balance_totals[currency] = balance_totals.get(currency, Decimal("0")) - normalized_amount
+            balance_totals[currency] = (
+                balance_totals.get(currency, Decimal("0")) - normalized_amount
+            )
 
     return TransactionListSummary(
         active_categories_count=active_categories_count,
@@ -439,3 +537,79 @@ def _normalize_decimal(value: Decimal | int | float | None) -> Decimal:
         return value
 
     return Decimal(str(value))
+
+
+def _get_category_for_user(
+    db: Session,
+    *,
+    user_id: UUID,
+    category_id: UUID | None,
+) -> Category | None:
+    if category_id is None:
+        return None
+
+    category = db.query(Category).filter(
+        Category.id == category_id,
+        Category.user_id == user_id,
+    ).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return category
+
+
+def _resolve_financial_account(
+    db: Session,
+    *,
+    user_id: UUID,
+    user,
+    financial_account_id: UUID | None,
+) -> FinancialAccount:
+    if financial_account_id is None:
+        account, _ = ensure_default_financial_account(db, user)
+        return account
+
+    account = get_financial_account_for_user(db, user_id, financial_account_id)
+    if account.currency is None and user.base_currency is not None:
+        account.currency = user.base_currency
+    return account
+
+
+def _resolve_transaction_type(
+    *,
+    category: Category | None,
+    requested_type: TransactionType | str | None,
+) -> TransactionType:
+    normalized_type = _normalize_transaction_type(requested_type)
+
+    if normalized_type in {TransactionType.transfer, TransactionType.adjustment}:
+        raise HTTPException(
+            status_code=409,
+            detail="Only income and expense transaction types are supported right now",
+        )
+
+    if category is None:
+        raise HTTPException(status_code=422, detail="Category is required")
+
+    # Category direction is the canonical source of truth in the current UX.
+    # Older/stale clients may still send an outdated income/expense value when
+    # the user switches categories before saving, so normalize to the category.
+    return _category_direction_to_transaction_type(category.direction)
+
+
+def _category_direction_to_transaction_type(
+    direction: CategoryDirection | str,
+) -> TransactionType:
+    normalized_direction = (
+        direction.value if isinstance(direction, CategoryDirection) else str(direction)
+    )
+    if normalized_direction == CategoryDirection.income.value:
+        return TransactionType.income
+    return TransactionType.expense
+
+
+def _normalize_transaction_type(
+    value: TransactionType | str | None,
+) -> TransactionType | None:
+    if value is None or isinstance(value, TransactionType):
+        return value
+    return TransactionType(str(value))

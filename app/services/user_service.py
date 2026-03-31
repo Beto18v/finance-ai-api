@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.transaction import Transaction
 from app.schemas.user import UserBootstrap, UserCreate, UserUpdate
 from app.services.exchange_rate_service import refresh_transaction_fx_snapshots_for_user
+from app.services.financial_account_service import ensure_default_financial_account
 
 DEFAULT_USER_NAME = "User"
 
@@ -61,12 +62,13 @@ def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
         if "email" in update_data and update_data["email"] is not None:
             update_data["email"] = str(update_data["email"])
         changed = _reactivate_user(user)
-        _apply_user_updates(
+        changed = _apply_user_updates(
             db,
             user,
             update_data,
-        )
-        if changed or update_data:
+        ) or changed
+        _, account_changed = ensure_default_financial_account(db, user)
+        if changed or update_data or account_changed:
             db.commit()
             db.refresh(user)
         return user
@@ -79,6 +81,7 @@ def create_user(db: Session, user_id: UUID, user_data: UserCreate) -> User:
         timezone=user_data.timezone,
     )
     db.add(user)
+    ensure_default_financial_account(db, user)
     db.commit()
     db.refresh(user)
     return user
@@ -125,6 +128,7 @@ def update_current_user(db: Session, user_id: UUID, user_data: UserUpdate) -> Us
 
     updated_fields: dict[str, Any] = user_data.model_dump(exclude_unset=True)
     _apply_user_updates(db, user, updated_fields)
+    ensure_default_financial_account(db, user)
 
     db.commit()
     db.refresh(user)
@@ -162,6 +166,9 @@ def bootstrap_current_user(
             if bootstrap_updates:
                 changed = _apply_user_updates(db, user, bootstrap_updates) or changed
 
+        _, account_changed = ensure_default_financial_account(db, user)
+        changed = account_changed or changed
+
         if changed:
             db.commit()
             db.refresh(user)
@@ -176,6 +183,7 @@ def bootstrap_current_user(
         timezone=user_data.timezone if user_data else None,
     )
     db.add(user)
+    ensure_default_financial_account(db, user)
     db.commit()
     db.refresh(user)
     return user

@@ -13,6 +13,7 @@ from app.routes import (
     analytics_routes,
     balance_routes,
     category_routes,
+    financial_account_routes,
     transaction_routes,
     user_routes,
 )
@@ -23,6 +24,7 @@ async def lifespan(_: FastAPI):
     # Import models so SQLAlchemy registers them in Base.metadata
     from app.models.user import User  # noqa: F401
     from app.models.category import Category  # noqa: F401
+    from app.models.financial_account import FinancialAccount  # noqa: F401
     from app.models.transaction import Transaction  # noqa: F401
     from app.models.exchange_rate import ExchangeRate  # noqa: F401
 
@@ -55,6 +57,7 @@ def healthcheck() -> dict[str, str]:
 
 app.include_router(user_routes.router)
 app.include_router(category_routes.router)
+app.include_router(financial_account_routes.router)
 app.include_router(transaction_routes.router)
 app.include_router(balance_routes.router)
 app.include_router(analytics_routes.router)

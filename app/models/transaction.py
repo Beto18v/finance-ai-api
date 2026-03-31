@@ -1,4 +1,5 @@
 import uuid
+import enum
 
 from sqlalchemy import (
     Column,
@@ -8,6 +9,7 @@ from sqlalchemy import (
     Numeric,
     DateTime,
     Date,
+    Enum,
     func,
     Index,
     Uuid,
@@ -15,6 +17,13 @@ from sqlalchemy import (
 
 from sqlalchemy.orm import relationship
 from app.database.base import Base
+
+
+class TransactionType(str, enum.Enum):
+    income = "income"
+    expense = "expense"
+    transfer = "transfer"
+    adjustment = "adjustment"
 
 
 class Transaction(Base):
@@ -32,10 +41,26 @@ class Transaction(Base):
         nullable=False
     )
 
+    financial_account_id = Column(
+        Uuid(as_uuid=True),
+        ForeignKey("financial_accounts.id"),
+        nullable=False
+    )
+
     category_id = Column(
         Uuid(as_uuid=True),
         ForeignKey("categories.id"),
+        nullable=True
+    )
+
+    transaction_type = Column(
+        Enum(TransactionType),
         nullable=False
+    )
+
+    transfer_group_id = Column(
+        Uuid(as_uuid=True),
+        nullable=True
     )
 
     amount = Column(
@@ -94,10 +119,21 @@ class Transaction(Base):
     ## Relationships
     user = relationship("User", back_populates="transactions")
 
+    financial_account = relationship(
+        "FinancialAccount",
+        back_populates="transactions"
+    )
+
     category = relationship("Category", back_populates="transactions")
 
     __table_args__ = (
         CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
         Index("idx_user_date", "user_id", "occurred_at"),
         Index("idx_user_category", "user_id", "category_id"),
+        Index(
+            "idx_transactions_user_financial_account",
+            "user_id",
+            "financial_account_id",
+        ),
+        Index("idx_transactions_transfer_group", "transfer_group_id"),
     )

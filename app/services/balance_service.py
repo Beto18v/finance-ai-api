@@ -9,9 +9,10 @@ from app.analytics import (
     MonthlyBalanceOverview,
     build_monthly_balance_overview,
 )
-from app.models.category import Category, CategoryDirection
-from app.models.transaction import Transaction
+from app.analytics.common import AGGREGATED_TRANSACTION_TYPES
+from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
+from app.services.financial_account_service import get_financial_account_for_user
 from app.services.user_service import ensure_active_user
 from app.schemas.balance import (
     BalanceMonthRead,
@@ -25,6 +26,7 @@ def get_balance_overview_data(
     *,
     year: int | None = None,
     month: int | None = None,
+    financial_account_id: UUID | None = None,
 ) -> tuple[User, MonthlyBalanceOverview]:
     user = ensure_active_user(db, user_id)
     if not user.base_currency:
@@ -33,8 +35,18 @@ def get_balance_overview_data(
             detail="User base currency must be configured before calculating balance",
         )
 
+    if financial_account_id is not None:
+        get_financial_account_for_user(db, user_id, financial_account_id)
+
     # Analytics only consume base-currency snapshots so raw amounts from mixed
     # currencies never leak into a consolidated total.
+    filters = [
+        Transaction.user_id == user_id,
+        Transaction.transaction_type.in_(AGGREGATED_TRANSACTION_TYPES),
+    ]
+    if financial_account_id is not None:
+        filters.append(Transaction.financial_account_id == financial_account_id)
+
     transaction_rows = (
         db.query(
             Transaction.id,
@@ -42,15 +54,9 @@ def get_balance_overview_data(
             Transaction.currency,
             Transaction.base_currency,
             Transaction.amount_in_base_currency,
-            Category.direction,
+            Transaction.transaction_type,
         )
-        .join(Category, Transaction.category_id == Category.id)
-        .filter(
-            and_(
-                Transaction.user_id == user_id,
-                Category.user_id == user_id,
-            )
-        )
+        .filter(and_(*filters))
         .all()
     )
 
@@ -59,7 +65,7 @@ def get_balance_overview_data(
             AnalyticsTransactionRow(
                 transaction_id=row.id,
                 occurred_at=row.occurred_at,
-                direction=_direction_to_text(row.direction),
+                direction=_direction_to_text(row.transaction_type),
                 source_currency=row.currency,
                 base_currency=row.base_currency,
                 amount_in_base_currency=row.amount_in_base_currency,
@@ -81,8 +87,15 @@ def get_balance_overview(
     *,
     year: int | None = None,
     month: int | None = None,
+    financial_account_id: UUID | None = None,
 ) -> BalanceOverviewRead:
-    _, overview = get_balance_overview_data(db, user_id, year=year, month=month)
+    _, overview = get_balance_overview_data(
+        db,
+        user_id,
+        year=year,
+        month=month,
+        financial_account_id=financial_account_id,
+    )
     return serialize_balance_overview(overview)
 
 
@@ -111,7 +124,7 @@ def serialize_balance_overview(overview: MonthlyBalanceOverview) -> BalanceOverv
     )
 
 
-def _direction_to_text(direction: CategoryDirection | str) -> str:
-    if isinstance(direction, CategoryDirection):
+def _direction_to_text(direction: TransactionType | str) -> str:
+    if isinstance(direction, TransactionType):
         return direction.value
     return str(direction)

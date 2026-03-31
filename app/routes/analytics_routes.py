@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.core.auth import get_current_user_id
 from app.database.session import get_db
@@ -21,11 +22,18 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 def get_analytics_summary_endpoint(
     year: int | None = Query(None, ge=1900, le=9999),
     month: int | None = Query(None, ge=1, le=12),
+    financial_account_id: UUID | None = Query(None),
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     ensure_active_user(db, user_id)
-    return get_analytics_summary(db, user_id, year=year, month=month)
+    return get_analytics_summary(
+        db,
+        user_id,
+        year=year,
+        month=month,
+        financial_account_id=financial_account_id,
+    )
 
 
 @router.get("/category-breakdown", response_model=AnalyticsCategoryBreakdownRead)
@@ -33,6 +41,7 @@ def get_analytics_category_breakdown_endpoint(
     year: int = Query(..., ge=1900, le=9999),
     month: int = Query(..., ge=1, le=12),
     direction: CategoryDirection | None = Query(None),
+    financial_account_id: UUID | None = Query(None),
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -43,4 +52,5 @@ def get_analytics_category_breakdown_endpoint(
         year=year,
         month=month,
         direction=direction,
+        financial_account_id=financial_account_id,
     )

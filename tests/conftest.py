@@ -88,10 +88,11 @@ def engine():
     # Import models so SQLAlchemy registers them
     from app.models.user import User
     from app.models.category import Category
+    from app.models.financial_account import FinancialAccount
     from app.models.transaction import Transaction
     from app.models.exchange_rate import ExchangeRate
 
-    _ = (User, Category, Transaction, ExchangeRate)
+    _ = (User, Category, FinancialAccount, Transaction, ExchangeRate)
 
     Base.metadata.create_all(bind=engine_)
     return engine_

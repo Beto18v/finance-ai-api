@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from app.models.financial_account import FinancialAccount
 from app.models.transaction import Transaction
+from app.models.transaction import TransactionType
 
 
 def create_configured_user(client, *, timezone_name: str = "UTC"):
@@ -34,11 +36,13 @@ def create_transaction(
     amount: str,
     description: str,
     occurred_at: datetime,
+    financial_account_id: str | None = None,
 ):
     response = client.post(
         "/transactions/",
         json={
             "category_id": category_id,
+            "financial_account_id": financial_account_id,
             "amount": amount,
             "currency": "COP",
             "description": description,
@@ -90,10 +94,22 @@ def test_category_breakdown_returns_month_totals_percentages_and_skipped_transac
         occurred_at=datetime(2026, 3, 1, 12, tzinfo=timezone.utc),
     )
 
+    default_account = (
+        db_session.query(FinancialAccount)
+        .filter(
+            FinancialAccount.user_id == UUID(user["id"]),
+            FinancialAccount.is_default.is_(True),
+        )
+        .first()
+    )
+    assert default_account is not None
+
     db_session.add(
         Transaction(
             user_id=UUID(user["id"]),
+            financial_account_id=default_account.id,
             category_id=UUID(rent["id"]),
+            transaction_type=TransactionType.expense,
             amount="999.00",
             currency="USD",
             base_currency=None,
@@ -106,7 +122,9 @@ def test_category_breakdown_returns_month_totals_percentages_and_skipped_transac
     db_session.add(
         Transaction(
             user_id=UUID(user["id"]),
+            financial_account_id=default_account.id,
             category_id=UUID(salary["id"]),
+            transaction_type=TransactionType.income,
             amount="500.00",
             currency="USD",
             base_currency=None,
@@ -249,4 +267,129 @@ def test_category_breakdown_uses_user_timezone_for_month_boundaries(client):
         "total": "0.00",
         "skipped_transactions": 0,
         "breakdown": [],
+    }
+
+
+def test_category_breakdown_can_filter_by_financial_account_and_ignores_non_aggregated_types(
+    client,
+    db_session,
+):
+    cleanup = client.delete("/users/me")
+    assert cleanup.status_code in (204, 404)
+
+    user = create_configured_user(client)
+    groceries = create_category(client, name="Groceries", direction="expense")
+    salary = create_category(client, name="Salary", direction="income")
+
+    default_account = client.get("/financial-accounts/").json()[0]
+    extra_account = client.post(
+        "/financial-accounts/",
+        json={"name": "Wallet"},
+    ).json()
+
+    create_transaction(
+        client,
+        financial_account_id=default_account["id"],
+        category_id=groceries["id"],
+        amount="100000.00",
+        description="Main groceries",
+        occurred_at=datetime(2026, 3, 2, 12, tzinfo=timezone.utc),
+    )
+    create_transaction(
+        client,
+        financial_account_id=extra_account["id"],
+        category_id=groceries["id"],
+        amount="200000.00",
+        description="Wallet groceries",
+        occurred_at=datetime(2026, 3, 3, 12, tzinfo=timezone.utc),
+    )
+    create_transaction(
+        client,
+        financial_account_id=extra_account["id"],
+        category_id=salary["id"],
+        amount="500000.00",
+        description="Wallet salary",
+        occurred_at=datetime(2026, 3, 4, 12, tzinfo=timezone.utc),
+    )
+
+    db_session.add_all(
+        [
+            Transaction(
+                user_id=UUID(user["id"]),
+                financial_account_id=UUID(extra_account["id"]),
+                category_id=UUID(groceries["id"]),
+                transaction_type=TransactionType.transfer,
+                amount="999.00",
+                currency="COP",
+                base_currency="COP",
+                amount_in_base_currency="999.00",
+                description="Ignored transfer",
+                occurred_at=datetime(2026, 3, 5, 12, tzinfo=timezone.utc),
+                created_at=datetime(2026, 3, 5, 12, tzinfo=timezone.utc),
+            ),
+            Transaction(
+                user_id=UUID(user["id"]),
+                financial_account_id=UUID(extra_account["id"]),
+                category_id=UUID(salary["id"]),
+                transaction_type=TransactionType.adjustment,
+                amount="888.00",
+                currency="COP",
+                base_currency="COP",
+                amount_in_base_currency="888.00",
+                description="Ignored adjustment",
+                occurred_at=datetime(2026, 3, 6, 12, tzinfo=timezone.utc),
+                created_at=datetime(2026, 3, 6, 12, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    consolidated = client.get("/analytics/category-breakdown?year=2026&month=3")
+    assert consolidated.status_code == 200
+    assert consolidated.json() == {
+        "month_start": "2026-03-01",
+        "currency": "COP",
+        "direction": None,
+        "total": "800000.00",
+        "skipped_transactions": 0,
+        "breakdown": [
+            {
+                "category_id": salary["id"],
+                "category_name": "Salary",
+                "direction": "income",
+                "amount": "500000.00",
+                "percentage": "62.50",
+                "transaction_count": 1,
+            },
+            {
+                "category_id": groceries["id"],
+                "category_name": "Groceries",
+                "direction": "expense",
+                "amount": "300000.00",
+                "percentage": "37.50",
+                "transaction_count": 2,
+            },
+        ],
+    }
+
+    filtered = client.get(
+        f"/analytics/category-breakdown?year=2026&month=3&direction=expense&financial_account_id={extra_account['id']}"
+    )
+    assert filtered.status_code == 200
+    assert filtered.json() == {
+        "month_start": "2026-03-01",
+        "currency": "COP",
+        "direction": "expense",
+        "total": "200000.00",
+        "skipped_transactions": 0,
+        "breakdown": [
+            {
+                "category_id": groceries["id"],
+                "category_name": "Groceries",
+                "direction": "expense",
+                "amount": "200000.00",
+                "percentage": "100.00",
+                "transaction_count": 1,
+            }
+        ],
     }

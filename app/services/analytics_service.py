@@ -5,16 +5,19 @@ from datetime import date
 from fastapi import HTTPException
 from uuid import UUID
 
-from sqlalchemy import and_
+from sqlalchemy import String, and_, cast, func
 from sqlalchemy.orm import Session
 
 from app.analytics import (
     CategoryBreakdownRow,
     build_category_breakdown,
 )
-from app.analytics.common import resolve_month_utc_range
+from app.analytics.common import (
+    AGGREGATED_TRANSACTION_TYPES,
+    resolve_month_utc_range,
+)
 from app.models.category import Category, CategoryDirection
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionType
 from app.schemas.analytics import (
     AnalyticsCategoryBreakdownItemRead,
     AnalyticsCategoryBreakdownRead,
@@ -25,6 +28,7 @@ from app.services.balance_service import (
     get_balance_overview_data,
     serialize_balance_overview,
 )
+from app.services.financial_account_service import get_financial_account_for_user
 from app.services.user_service import ensure_active_user
 
 RECENT_TRANSACTIONS_LIMIT = 5
@@ -36,14 +40,22 @@ def get_analytics_summary(
     *,
     year: int | None = None,
     month: int | None = None,
+    financial_account_id: UUID | None = None,
 ) -> AnalyticsSummaryRead:
-    user, overview = get_balance_overview_data(db, user_id, year=year, month=month)
+    user, overview = get_balance_overview_data(
+        db,
+        user_id,
+        year=year,
+        month=month,
+        financial_account_id=financial_account_id,
+    )
     balance_overview = serialize_balance_overview(overview)
     recent_transactions = _get_recent_transactions_for_month(
         db,
         user_id=user_id,
         month_start=overview.current.month_start,
         timezone_name=user.timezone or "UTC",
+        financial_account_id=financial_account_id,
     )
 
     return AnalyticsSummaryRead(
@@ -61,6 +73,7 @@ def get_analytics_category_breakdown(
     year: int,
     month: int,
     direction: CategoryDirection | None = None,
+    financial_account_id: UUID | None = None,
 ) -> AnalyticsCategoryBreakdownRead:
     user = ensure_active_user(db, user_id)
     if not user.base_currency:
@@ -69,11 +82,24 @@ def get_analytics_category_breakdown(
             detail="User base currency must be configured before calculating balance",
         )
 
+    if financial_account_id is not None:
+        get_financial_account_for_user(db, user_id, financial_account_id)
+
     month_start = date(year, month, 1)
     start_utc, end_utc = resolve_month_utc_range(
         month_start=month_start,
         timezone_name=user.timezone or "UTC",
     )
+    filters = [
+        Transaction.user_id == user_id,
+        Category.user_id == user_id,
+        Transaction.occurred_at >= start_utc,
+        Transaction.occurred_at < end_utc,
+        Transaction.transaction_type.in_(AGGREGATED_TRANSACTION_TYPES),
+    ]
+    if financial_account_id is not None:
+        filters.append(Transaction.financial_account_id == financial_account_id)
+
     rows = (
         db.query(
             Transaction.id,
@@ -83,17 +109,10 @@ def get_analytics_category_breakdown(
             Transaction.base_currency,
             Transaction.amount_in_base_currency,
             Category.name.label("category_name"),
-            Category.direction,
+            Transaction.transaction_type,
         )
         .join(Category, Transaction.category_id == Category.id)
-        .filter(
-            and_(
-                Transaction.user_id == user_id,
-                Category.user_id == user_id,
-                Transaction.occurred_at >= start_utc,
-                Transaction.occurred_at < end_utc,
-            )
-        )
+        .filter(and_(*filters))
         .all()
     )
     breakdown = build_category_breakdown(
@@ -103,7 +122,7 @@ def get_analytics_category_breakdown(
                 category_id=row.category_id,
                 category_name=row.category_name,
                 occurred_at=row.occurred_at,
-                direction=_direction_to_text(row.direction),
+                direction=_direction_to_text(row.transaction_type),
                 source_currency=row.currency,
                 base_currency=row.base_currency,
                 amount_in_base_currency=row.amount_in_base_currency,
@@ -141,34 +160,40 @@ def _get_recent_transactions_for_month(
     user_id: UUID,
     month_start: date,
     timezone_name: str,
+    financial_account_id: UUID | None = None,
 ) -> list[AnalyticsSummaryTransactionRead]:
     start_utc, end_utc = resolve_month_utc_range(
         month_start=month_start,
         timezone_name=timezone_name,
     )
 
+    filters = [
+        Transaction.user_id == user_id,
+        Transaction.occurred_at >= start_utc,
+        Transaction.occurred_at < end_utc,
+    ]
+    if financial_account_id is not None:
+        filters.append(Transaction.financial_account_id == financial_account_id)
+
     rows = (
         db.query(
             Transaction.id,
             Transaction.category_id,
+            Transaction.financial_account_id,
             Transaction.amount,
             Transaction.currency,
             Transaction.base_currency,
             Transaction.amount_in_base_currency,
             Transaction.description,
             Transaction.occurred_at,
-            Category.name.label("category_name"),
-            Category.direction,
+            func.coalesce(
+                Category.name,
+                cast(Transaction.transaction_type, String),
+            ).label("category_name"),
+            Transaction.transaction_type,
         )
-        .join(Category, Transaction.category_id == Category.id)
-        .filter(
-            and_(
-                Transaction.user_id == user_id,
-                Category.user_id == user_id,
-                Transaction.occurred_at >= start_utc,
-                Transaction.occurred_at < end_utc,
-            )
-        )
+        .outerjoin(Category, Transaction.category_id == Category.id)
+        .filter(and_(*filters))
         .order_by(Transaction.occurred_at.desc(), Transaction.created_at.desc())
         .limit(RECENT_TRANSACTIONS_LIMIT)
         .all()
@@ -178,8 +203,9 @@ def _get_recent_transactions_for_month(
         AnalyticsSummaryTransactionRead(
             id=row.id,
             category_id=row.category_id,
+            financial_account_id=row.financial_account_id,
             category_name=row.category_name,
-            direction=_direction_to_text(row.direction),
+            direction=_direction_to_text(row.transaction_type),
             amount=row.amount,
             currency=row.currency,
             base_currency=row.base_currency,
@@ -191,7 +217,7 @@ def _get_recent_transactions_for_month(
     ]
 
 
-def _direction_to_text(direction: CategoryDirection | str) -> str:
-    if isinstance(direction, CategoryDirection):
+def _direction_to_text(direction: TransactionType | CategoryDirection | str) -> str:
+    if isinstance(direction, (TransactionType, CategoryDirection)):
         return direction.value
     return str(direction)

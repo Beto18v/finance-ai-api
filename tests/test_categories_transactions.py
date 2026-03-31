@@ -64,6 +64,8 @@ def test_create_and_list_transactions(client):
         },
     )
     assert tx.status_code == 200
+    default_account = client.get("/financial-accounts/")
+    assert default_account.status_code == 200
 
     listed = client.get("/transactions/")
     assert listed.status_code == 200
@@ -72,6 +74,9 @@ def test_create_and_list_transactions(client):
             {
                 "id": listed.json()["items"][0]["id"],
                 "category_id": cat["id"],
+                "financial_account_id": default_account.json()[0]["id"],
+                "transaction_type": "expense",
+                "transfer_group_id": None,
                 "amount": "25.00",
                 "currency": "COP",
                 "fx_rate": "1.00000000",
@@ -95,6 +100,37 @@ def test_create_and_list_transactions(client):
             "balance_totals": [{"currency": "COP", "amount": "-25.00"}],
         },
     }
+
+
+def test_create_user_provisions_default_financial_account(client):
+    created = create_configured_user(client)
+    assert created.status_code == 200
+
+    listed = client.get("/financial-accounts/")
+    assert listed.status_code == 200
+    assert listed.json() == [
+        {
+            "id": listed.json()[0]["id"],
+            "name": "Main account",
+            "currency": "COP",
+            "is_default": True,
+            "created_at": listed.json()[0]["created_at"],
+        }
+    ]
+
+
+def test_default_financial_account_currency_follows_base_currency_before_transactions(
+    client,
+):
+    created = create_configured_user(client)
+    assert created.status_code == 200
+
+    updated = client.put("/users/me", json={"base_currency": "USD"})
+    assert updated.status_code == 200
+
+    listed = client.get("/financial-accounts/")
+    assert listed.status_code == 200
+    assert listed.json()[0]["currency"] == "USD"
 
 
 def test_list_transactions_supports_parent_category_date_filters_and_pagination(client):
@@ -168,6 +204,9 @@ def test_list_transactions_supports_parent_category_date_filters_and_pagination(
             {
                 "id": listed.json()["items"][0]["id"],
                 "category_id": parent.json()["id"],
+                "financial_account_id": listed.json()["items"][0]["financial_account_id"],
+                "transaction_type": "expense",
+                "transfer_group_id": None,
                 "amount": "80.00",
                 "currency": "COP",
                 "fx_rate": "1.00000000",
@@ -225,6 +264,9 @@ def test_list_transactions_can_skip_total_count_and_summary_for_lightweight_page
             {
                 "id": created.json()["id"],
                 "category_id": category.json()["id"],
+                "financial_account_id": created.json()["financial_account_id"],
+                "transaction_type": "expense",
+                "transfer_group_id": None,
                 "amount": "25.00",
                 "currency": "COP",
                 "fx_rate": "1.00000000",
@@ -265,6 +307,51 @@ def test_create_transaction_rejects_negative_amount(client):
     )
     assert created.status_code == 422
     assert created.json()["detail"] == "Transaction amount must be greater than zero"
+
+
+def test_create_transaction_rejects_unsupported_transfer_type(client):
+    create_configured_user(client)
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": None,
+            "transaction_type": "transfer",
+            "amount": "25.00",
+            "currency": "COP",
+            "description": "Move money",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 409
+    assert (
+        created.json()["detail"]
+        == "Only income and expense transaction types are supported right now"
+    )
+
+
+def test_create_transaction_normalizes_stale_income_expense_type_from_category(client):
+    create_configured_user(client)
+
+    income_category = client.post(
+        "/categories/",
+        json={"name": "Salary", "direction": "income", "parent_id": None},
+    )
+    assert income_category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": income_category.json()["id"],
+            "transaction_type": "expense",
+            "amount": "2500.00",
+            "currency": "COP",
+            "description": "Payroll",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 200
+    assert created.json()["transaction_type"] == "income"
 
 
 def test_category_crud(client):
@@ -516,6 +603,83 @@ def test_update_transaction_rejects_zero_amount(client):
     )
     assert updated.status_code == 422
     assert updated.json()["detail"] == "Transaction amount must be greater than zero"
+
+
+def test_update_transaction_recalculates_type_when_category_direction_changes(client):
+    create_configured_user(client)
+
+    expense_category = client.post(
+        "/categories/",
+        json={"name": "Transport", "direction": "expense", "parent_id": None},
+    )
+    assert expense_category.status_code == 200
+
+    income_category = client.post(
+        "/categories/",
+        json={"name": "Salary", "direction": "income", "parent_id": None},
+    )
+    assert income_category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": expense_category.json()["id"],
+            "amount": "15.25",
+            "currency": "COP",
+            "description": "Taxi",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 200
+    assert created.json()["transaction_type"] == "expense"
+
+    updated = client.put(
+        f"/transactions/{created.json()['id']}",
+        json={"category_id": income_category.json()["id"]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["category_id"] == income_category.json()["id"]
+    assert updated.json()["transaction_type"] == "income"
+
+
+def test_update_transaction_normalizes_stale_income_expense_type_from_category(client):
+    create_configured_user(client)
+
+    expense_category = client.post(
+        "/categories/",
+        json={"name": "Transport", "direction": "expense", "parent_id": None},
+    )
+    assert expense_category.status_code == 200
+
+    income_category = client.post(
+        "/categories/",
+        json={"name": "Salary", "direction": "income", "parent_id": None},
+    )
+    assert income_category.status_code == 200
+
+    created = client.post(
+        "/transactions/",
+        json={
+            "category_id": expense_category.json()["id"],
+            "amount": "15.25",
+            "currency": "COP",
+            "description": "Taxi",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created.status_code == 200
+    assert created.json()["transaction_type"] == "expense"
+
+    updated = client.put(
+        f"/transactions/{created.json()['id']}",
+        json={
+            "category_id": income_category.json()["id"],
+            "transaction_type": "expense",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["category_id"] == income_category.json()["id"]
+    assert updated.json()["transaction_type"] == "income"
 
 
 def test_delete_category_with_transactions_returns_conflict(client):

@@ -4,10 +4,18 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.core.finance import assume_utc_if_naive, get_timezone
+from app.models.transaction import TransactionType
 
 MONEY_QUANTIZER = Decimal("0.01")
 PERCENTAGE_QUANTIZER = Decimal("0.01")
-VALID_CATEGORY_DIRECTIONS = {"income", "expense"}
+AGGREGATED_TRANSACTION_TYPES = (
+    TransactionType.income,
+    TransactionType.expense,
+)
+AGGREGATED_TRANSACTION_DIRECTIONS = frozenset(
+    transaction_type.value for transaction_type in AGGREGATED_TRANSACTION_TYPES
+)
+VALID_CATEGORY_DIRECTIONS = AGGREGATED_TRANSACTION_DIRECTIONS
 
 
 def normalize_money(value: Decimal | int | float) -> Decimal:

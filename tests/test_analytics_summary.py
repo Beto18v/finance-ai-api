@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from app.models.financial_account import FinancialAccount
 from app.models.transaction import Transaction
+from app.models.transaction import TransactionType
 
 
 def create_configured_user(client, *, timezone_name: str = "UTC"):
@@ -34,11 +36,13 @@ def create_transaction(
     amount: str,
     description: str,
     occurred_at: datetime,
+    financial_account_id: str | None = None,
 ):
     response = client.post(
         "/transactions/",
         json={
             "category_id": category_id,
+            "financial_account_id": financial_account_id,
             "amount": amount,
             "currency": "COP",
             "description": description,
@@ -111,10 +115,22 @@ def test_analytics_summary_wraps_monthly_balance_and_recent_transactions(
         occurred_at=datetime(2026, 3, 12, 12, tzinfo=timezone.utc),
     )
 
+    default_account = (
+        db_session.query(FinancialAccount)
+        .filter(
+            FinancialAccount.user_id == UUID(user["id"]),
+            FinancialAccount.is_default.is_(True),
+        )
+        .first()
+    )
+    assert default_account is not None
+
     db_session.add(
         Transaction(
             user_id=UUID(user["id"]),
+            financial_account_id=default_account.id,
             category_id=UUID(expense_category["id"]),
+            transaction_type=TransactionType.expense,
             amount="999.00",
             currency="USD",
             base_currency=None,
@@ -168,6 +184,7 @@ def test_analytics_summary_wraps_monthly_balance_and_recent_transactions(
     ]
     assert recent_transactions[0]["category_name"] == "Salary"
     assert recent_transactions[0]["direction"] == "income"
+    assert recent_transactions[0]["financial_account_id"] == str(default_account.id)
     assert recent_transactions[3]["currency"] == "USD"
     assert recent_transactions[3]["amount_in_base_currency"] is None
 
@@ -202,6 +219,7 @@ def test_analytics_summary_uses_user_timezone_for_recent_transactions(client):
     assert cleanup.status_code in (204, 404)
 
     create_configured_user(client, timezone_name="America/Bogota")
+    default_account = client.get("/financial-accounts/").json()[0]
     income_category = create_category(client, name="Salary", direction="income")
 
     create_transaction(
@@ -226,6 +244,7 @@ def test_analytics_summary_uses_user_timezone_for_recent_transactions(client):
         {
             "id": february.json()["recent_transactions"][0]["id"],
             "category_id": income_category["id"],
+            "financial_account_id": default_account["id"],
             "category_name": "Salary",
             "direction": "income",
             "amount": "300000.00",
@@ -248,3 +267,86 @@ def test_analytics_summary_uses_user_timezone_for_recent_transactions(client):
         "skipped_transactions": 0,
     }
     assert march.json()["recent_transactions"] == []
+
+
+def test_analytics_summary_can_filter_by_financial_account(client):
+    cleanup = client.delete("/users/me")
+    assert cleanup.status_code in (204, 404)
+
+    create_configured_user(client)
+    income_category = create_category(client, name="Salary", direction="income")
+    expense_category = create_category(client, name="Bills", direction="expense")
+
+    default_account = client.get("/financial-accounts/").json()[0]
+    extra_account = client.post(
+        "/financial-accounts/",
+        json={"name": "Wallet"},
+    ).json()
+
+    create_transaction(
+        client,
+        financial_account_id=default_account["id"],
+        category_id=income_category["id"],
+        amount="100000.00",
+        description="Main salary",
+        occurred_at=datetime(2026, 3, 1, 12, tzinfo=timezone.utc),
+    )
+    create_transaction(
+        client,
+        financial_account_id=extra_account["id"],
+        category_id=expense_category["id"],
+        amount="30000.00",
+        description="Wallet bills",
+        occurred_at=datetime(2026, 3, 3, 12, tzinfo=timezone.utc),
+    )
+    create_transaction(
+        client,
+        financial_account_id=extra_account["id"],
+        category_id=income_category["id"],
+        amount="50000.00",
+        description="Wallet salary",
+        occurred_at=datetime(2026, 3, 5, 12, tzinfo=timezone.utc),
+    )
+    create_transaction(
+        client,
+        financial_account_id=default_account["id"],
+        category_id=expense_category["id"],
+        amount="10000.00",
+        description="Main bills",
+        occurred_at=datetime(2026, 3, 7, 12, tzinfo=timezone.utc),
+    )
+
+    consolidated = client.get("/analytics/summary?year=2026&month=3")
+    assert consolidated.status_code == 200
+    assert consolidated.json()["current"] == {
+        "month_start": "2026-03-01",
+        "currency": "COP",
+        "income": "150000.00",
+        "expense": "40000.00",
+        "balance": "110000.00",
+        "skipped_transactions": 0,
+    }
+    assert {
+        item["financial_account_id"]
+        for item in consolidated.json()["recent_transactions"]
+    } == {default_account["id"], extra_account["id"]}
+
+    filtered = client.get(
+        f"/analytics/summary?year=2026&month=3&financial_account_id={extra_account['id']}"
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["current"] == {
+        "month_start": "2026-03-01",
+        "currency": "COP",
+        "income": "50000.00",
+        "expense": "30000.00",
+        "balance": "20000.00",
+        "skipped_transactions": 0,
+    }
+    assert [item["description"] for item in filtered.json()["recent_transactions"]] == [
+        "Wallet salary",
+        "Wallet bills",
+    ]
+    assert {
+        item["financial_account_id"] for item in filtered.json()["recent_transactions"]
+    } == {extra_account["id"]}

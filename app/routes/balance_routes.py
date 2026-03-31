@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.core.auth import get_current_user_id
 from app.database.session import get_db
@@ -14,8 +15,15 @@ router = APIRouter(prefix="/balance", tags=["Balance"])
 def get_monthly_balance_endpoint(
     year: int | None = Query(None, ge=1900, le=9999),
     month: int | None = Query(None, ge=1, le=12),
+    financial_account_id: UUID | None = Query(None),
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     ensure_active_user(db, user_id)
-    return get_balance_overview(db, user_id, year=year, month=month)
+    return get_balance_overview(
+        db,
+        user_id,
+        year=year,
+        month=month,
+        financial_account_id=financial_account_id,
+    )

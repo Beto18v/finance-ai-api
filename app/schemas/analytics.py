@@ -10,7 +10,8 @@ from app.schemas.balance import BalanceOverviewRead
 
 class AnalyticsSummaryTransactionRead(BaseModel):
     id: UUID
-    category_id: UUID
+    category_id: UUID | None = None
+    financial_account_id: UUID
     category_name: str
     direction: str
     amount: Decimal

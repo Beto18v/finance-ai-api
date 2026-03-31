@@ -6,7 +6,12 @@ from decimal import Decimal
 from uuid import UUID
 
 from app.core.finance import assume_utc_if_naive, get_timezone
-from app.analytics.common import get_transaction_issue_reason, normalize_money, resolve_month_start
+from app.analytics.common import (
+    AGGREGATED_TRANSACTION_DIRECTIONS,
+    get_transaction_issue_reason,
+    normalize_money,
+    resolve_month_start,
+)
 
 
 @dataclass(slots=True)
@@ -59,6 +64,9 @@ def build_monthly_balance_overview(
     missing_conversions: list[MonthlyBalanceIssue] = []
 
     for row in rows:
+        if row.direction not in AGGREGATED_TRANSACTION_DIRECTIONS:
+            continue
+
         month_start = resolve_month_start(
             occurred_at=row.occurred_at,
             timezone_name=timezone_name,
@@ -98,20 +106,8 @@ def build_monthly_balance_overview(
         amount = normalize_money(row.amount_in_base_currency or Decimal("0"))
         if row.direction == "income":
             bucket["income"] = normalize_money(Decimal(bucket["income"]) + amount)
-        elif row.direction == "expense":
-            bucket["expense"] = normalize_money(Decimal(bucket["expense"]) + amount)
         else:
-            bucket["skipped_transactions"] = int(bucket["skipped_transactions"]) + 1
-            missing_conversions.append(
-                MonthlyBalanceIssue(
-                    transaction_id=row.transaction_id,
-                    occurred_at=occurred_at,
-                    month_start=month_start,
-                    source_currency=row.source_currency,
-                    target_currency=base_currency,
-                    reason="unknown_category_direction",
-                )
-            )
+            bucket["expense"] = normalize_money(Decimal(bucket["expense"]) + amount)
 
     series = sorted(
         (
