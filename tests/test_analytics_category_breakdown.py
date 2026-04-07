@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models.financial_account import FinancialAccount
-from app.models.transaction import Transaction
-from app.models.transaction import TransactionType
+from app.models.transaction import BalanceDirection, Transaction, TransactionType
 
 
 def create_configured_user(client, *, timezone_name: str = "UTC"):
@@ -110,6 +109,7 @@ def test_category_breakdown_returns_month_totals_percentages_and_skipped_transac
             financial_account_id=default_account.id,
             category_id=UUID(rent["id"]),
             transaction_type=TransactionType.expense,
+            balance_direction=BalanceDirection.outflow,
             amount="999.00",
             currency="USD",
             base_currency=None,
@@ -125,6 +125,7 @@ def test_category_breakdown_returns_month_totals_percentages_and_skipped_transac
             financial_account_id=default_account.id,
             category_id=UUID(salary["id"]),
             transaction_type=TransactionType.income,
+            balance_direction=BalanceDirection.inflow,
             amount="500.00",
             currency="USD",
             base_currency=None,
@@ -319,6 +320,7 @@ def test_category_breakdown_can_filter_by_financial_account_and_ignores_non_aggr
                 financial_account_id=UUID(extra_account["id"]),
                 category_id=UUID(groceries["id"]),
                 transaction_type=TransactionType.transfer,
+                balance_direction=BalanceDirection.outflow,
                 amount="999.00",
                 currency="COP",
                 base_currency="COP",
@@ -332,6 +334,7 @@ def test_category_breakdown_can_filter_by_financial_account_and_ignores_non_aggr
                 financial_account_id=UUID(extra_account["id"]),
                 category_id=UUID(salary["id"]),
                 transaction_type=TransactionType.adjustment,
+                balance_direction=BalanceDirection.inflow,
                 amount="888.00",
                 currency="COP",
                 base_currency="COP",

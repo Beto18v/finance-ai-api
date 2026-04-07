@@ -273,6 +273,7 @@ def _get_recent_transactions_for_month(
         Transaction.user_id == user_id,
         Transaction.occurred_at >= start_utc,
         Transaction.occurred_at < end_utc,
+        Transaction.transaction_type.in_(AGGREGATED_TRANSACTION_TYPES),
     ]
     if financial_account_id is not None:
         filters.append(Transaction.financial_account_id == financial_account_id)

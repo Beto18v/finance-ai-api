@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models.financial_account import FinancialAccount
-from app.models.transaction import Transaction
-from app.models.transaction import TransactionType
+from app.models.transaction import BalanceDirection, Transaction, TransactionType
 
 
 def create_configured_user(client, *, timezone_name: str = "UTC"):
@@ -131,6 +130,7 @@ def test_analytics_summary_wraps_monthly_balance_and_recent_transactions(
             financial_account_id=default_account.id,
             category_id=UUID(expense_category["id"]),
             transaction_type=TransactionType.expense,
+            balance_direction=BalanceDirection.outflow,
             amount="999.00",
             currency="USD",
             base_currency=None,

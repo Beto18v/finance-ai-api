@@ -10,11 +10,14 @@ from app.database.base import Base
 from app.database.connection import engine
 from app.core.errors import install_exception_handlers
 from app.routes import (
+    adjustment_routes,
     analytics_routes,
     balance_routes,
     category_routes,
     financial_account_routes,
+    ledger_routes,
     transaction_routes,
+    transfer_routes,
     user_routes,
 )
 
@@ -59,5 +62,8 @@ app.include_router(user_routes.router)
 app.include_router(category_routes.router)
 app.include_router(financial_account_routes.router)
 app.include_router(transaction_routes.router)
+app.include_router(transfer_routes.router)
+app.include_router(adjustment_routes.router)
+app.include_router(ledger_routes.router)
 app.include_router(balance_routes.router)
 app.include_router(analytics_routes.router)

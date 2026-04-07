@@ -7,8 +7,7 @@ from sqlalchemy import and_, case, distinct, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.category import Category, CategoryDirection
-from app.models.financial_account import FinancialAccount
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import BalanceDirection, Transaction, TransactionType
 from app.schemas.transaction import (
     TransactionAggregateTotal,
     TransactionCreate,
@@ -20,9 +19,13 @@ from app.services.exchange_rate_service import (
     apply_transaction_fx_snapshot,
     resolve_transaction_fx_snapshot,
 )
-from app.services.financial_account_service import (
-    ensure_default_financial_account,
-    get_financial_account_for_user,
+from app.services.ledger_shared import (
+    PUBLIC_TRANSACTION_TYPES,
+    ensure_transaction_amount_is_positive,
+    ensure_transaction_currency_matches_financial_account_currency,
+    ensure_transaction_currency_matches_user_base_currency,
+    get_transaction_for_user,
+    resolve_financial_account,
 )
 from app.services.user_service import ensure_active_user
 
@@ -33,19 +36,19 @@ def create_transaction(
     transaction_data: TransactionCreate,
 ):
     user = ensure_active_user(db, user_id)
-    _ensure_transaction_amount_is_positive(transaction_data.amount)
+    ensure_transaction_amount_is_positive(transaction_data.amount)
 
-    financial_account = _resolve_financial_account(
+    financial_account = resolve_financial_account(
         db,
         user_id=user_id,
         user=user,
         financial_account_id=transaction_data.financial_account_id,
     )
-    _ensure_transaction_currency_matches_user_base_currency(
+    ensure_transaction_currency_matches_user_base_currency(
         user_base_currency=user.base_currency,
         transaction_currency=transaction_data.currency,
     )
-    _ensure_transaction_currency_matches_financial_account_currency(
+    ensure_transaction_currency_matches_financial_account_currency(
         financial_account=financial_account,
         transaction_currency=transaction_data.currency,
     )
@@ -73,6 +76,7 @@ def create_transaction(
         financial_account_id=financial_account.id,
         category_id=category.id if category else None,
         transaction_type=transaction_type,
+        balance_direction=_transaction_type_to_balance_direction(transaction_type),
         amount=transaction_data.amount,
         currency=transaction_data.currency,
         description=transaction_data.description,
@@ -88,13 +92,12 @@ def create_transaction(
 
 
 def get_transaction(db: Session, user_id: UUID, transaction_id: UUID) -> Transaction:
-    transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id,
-        Transaction.user_id == user_id,
-    ).first()
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return transaction
+    return get_transaction_for_user(
+        db,
+        user_id,
+        transaction_id,
+        allowed_types=PUBLIC_TRANSACTION_TYPES,
+    )
 
 
 def list_transactions(
@@ -164,7 +167,7 @@ def update_transaction(
     updates = transaction_data.model_dump(exclude_unset=True)
 
     if "amount" in updates and updates["amount"] is not None:
-        _ensure_transaction_amount_is_positive(updates["amount"])
+        ensure_transaction_amount_is_positive(updates["amount"])
 
     category_id = (
         updates["category_id"]
@@ -193,7 +196,7 @@ def update_transaction(
         if "financial_account_id" in updates
         else transaction.financial_account_id
     )
-    financial_account = _resolve_financial_account(
+    financial_account = resolve_financial_account(
         db,
         user_id=user_id,
         user=user,
@@ -202,6 +205,9 @@ def update_transaction(
 
     transaction.category_id = category.id if category else None
     transaction.transaction_type = transaction_type
+    transaction.balance_direction = _transaction_type_to_balance_direction(
+        transaction_type
+    )
     transaction.financial_account_id = financial_account.id
 
     for field in (
@@ -213,11 +219,11 @@ def update_transaction(
         if field in updates:
             setattr(transaction, field, updates[field])
 
-    _ensure_transaction_currency_matches_user_base_currency(
+    ensure_transaction_currency_matches_user_base_currency(
         user_base_currency=user.base_currency,
         transaction_currency=transaction.currency,
     )
-    _ensure_transaction_currency_matches_financial_account_currency(
+    ensure_transaction_currency_matches_financial_account_currency(
         financial_account=financial_account,
         transaction_currency=transaction.currency,
     )
@@ -246,49 +252,6 @@ def delete_transaction(db: Session, user_id: UUID, transaction_id: UUID) -> None
     db.commit()
 
 
-def _ensure_transaction_currency_matches_user_base_currency(
-    *,
-    user_base_currency: str | None,
-    transaction_currency: str,
-) -> None:
-    # Product rule: Dinerance is single-currency in the user-facing flow.
-    # FX snapshots stay internal and do not reopen multi-currency input.
-    if not user_base_currency:
-        raise HTTPException(
-            status_code=409,
-            detail="User base currency must be configured before creating transactions",
-        )
-
-    if transaction_currency != user_base_currency:
-        raise HTTPException(
-            status_code=409,
-            detail="Transactions must use the user's base currency",
-        )
-
-
-def _ensure_transaction_currency_matches_financial_account_currency(
-    *,
-    financial_account: FinancialAccount,
-    transaction_currency: str,
-) -> None:
-    if (
-        financial_account.currency is not None
-        and transaction_currency != financial_account.currency
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="Transactions must use the financial account currency",
-        )
-
-
-def _ensure_transaction_amount_is_positive(amount: Decimal) -> None:
-    if amount <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail="Transaction amount must be greater than zero",
-        )
-
-
 def _build_transactions_query(
     db: Session,
     user_id: UUID,
@@ -308,7 +271,10 @@ def _build_transactions_query(
                 Category.user_id == user_id,
             ),
         )
-        .filter(Transaction.user_id == user_id)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type.in_(PUBLIC_TRANSACTION_TYPES),
+        )
     )
 
     if category_id:
@@ -557,23 +523,6 @@ def _get_category_for_user(
     return category
 
 
-def _resolve_financial_account(
-    db: Session,
-    *,
-    user_id: UUID,
-    user,
-    financial_account_id: UUID | None,
-) -> FinancialAccount:
-    if financial_account_id is None:
-        account, _ = ensure_default_financial_account(db, user)
-        return account
-
-    account = get_financial_account_for_user(db, user_id, financial_account_id)
-    if account.currency is None and user.base_currency is not None:
-        account.currency = user.base_currency
-    return account
-
-
 def _resolve_transaction_type(
     *,
     category: Category | None,
@@ -613,3 +562,11 @@ def _normalize_transaction_type(
     if value is None or isinstance(value, TransactionType):
         return value
     return TransactionType(str(value))
+
+
+def _transaction_type_to_balance_direction(
+    transaction_type: TransactionType,
+) -> BalanceDirection:
+    if transaction_type == TransactionType.income:
+        return BalanceDirection.inflow
+    return BalanceDirection.outflow

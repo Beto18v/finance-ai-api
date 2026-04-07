@@ -26,6 +26,18 @@ class TransactionType(str, enum.Enum):
     adjustment = "adjustment"
 
 
+class BalanceDirection(str, enum.Enum):
+    inflow = "in"
+    outflow = "out"
+
+
+balance_direction_enum = Enum(
+    BalanceDirection,
+    values_callable=lambda enum_class: [item.value for item in enum_class],
+    name="balancedirection",
+)
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
 
@@ -55,6 +67,11 @@ class Transaction(Base):
 
     transaction_type = Column(
         Enum(TransactionType),
+        nullable=False
+    )
+
+    balance_direction = Column(
+        balance_direction_enum,
         nullable=False
     )
 
@@ -128,6 +145,17 @@ class Transaction(Base):
 
     __table_args__ = (
         CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
+        CheckConstraint(
+            """
+            (transaction_type = 'income' AND balance_direction = 'in')
+            OR (transaction_type = 'expense' AND balance_direction = 'out')
+            OR (
+                transaction_type IN ('transfer', 'adjustment')
+                AND balance_direction IN ('in', 'out')
+            )
+            """,
+            name="ck_transactions_balance_direction_matches_type",
+        ),
         Index("idx_user_date", "user_id", "occurred_at"),
         Index("idx_user_category", "user_id", "category_id"),
         Index(

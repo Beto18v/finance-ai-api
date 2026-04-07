@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import BalanceDirection, Transaction, TransactionType
 
 
 def create_configured_user(client):
@@ -248,6 +248,7 @@ def test_balance_can_filter_by_financial_account_and_ignores_non_aggregated_type
                 financial_account_id=UUID(extra_account["id"]),
                 category_id=None,
                 transaction_type=TransactionType.transfer,
+                balance_direction=BalanceDirection.outflow,
                 amount="999999.00",
                 currency="COP",
                 base_currency="COP",
@@ -261,6 +262,7 @@ def test_balance_can_filter_by_financial_account_and_ignores_non_aggregated_type
                 financial_account_id=UUID(extra_account["id"]),
                 category_id=None,
                 transaction_type=TransactionType.adjustment,
+                balance_direction=BalanceDirection.inflow,
                 amount="888888.00",
                 currency="COP",
                 base_currency="COP",
