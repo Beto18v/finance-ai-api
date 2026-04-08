@@ -81,3 +81,8 @@ class User(Base):
         "Category",
         back_populates="user"
     )
+
+    obligations = relationship(
+        "Obligation",
+        back_populates="user"
+    )

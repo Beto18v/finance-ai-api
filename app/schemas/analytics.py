@@ -51,6 +51,7 @@ class AnalyticsCategoryBreakdownRead(BaseModel):
 
 
 class AnalyticsRecurringCandidateRead(BaseModel):
+    recurring_candidate_key: str
     label: str
     description: str | None = None
     category_id: UUID
@@ -67,6 +68,8 @@ class AnalyticsRecurringCandidateRead(BaseModel):
     interval_days: list[int]
     first_occurred_at: datetime
     last_occurred_at: datetime
+    confirmed_obligation_id: UUID | None = None
+    confirmed_obligation_status: Literal["active", "paused", "archived"] | None = None
 
     @field_validator("first_occurred_at", "last_occurred_at", mode="before")
     @classmethod

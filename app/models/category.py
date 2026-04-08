@@ -73,3 +73,8 @@ class Category(Base):
         "Transaction",
         back_populates="category"
     )
+
+    obligations = relationship(
+        "Obligation",
+        back_populates="category"
+    )

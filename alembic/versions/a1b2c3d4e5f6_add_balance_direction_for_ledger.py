@@ -119,9 +119,9 @@ def _raise_for_detected_legacy_ledger_rows(
 
     raise RuntimeError(
         "Migration cannot infer balance_direction for legacy transfer/"
-        "adjustment rows created before M1. Those flows were not supported as "
-        "a complete product path before this milestone, so the safe path is to "
-        "clean or manually backfill that data outside the migration before "
+        "adjustment rows created before transfer and adjustment flows were "
+        "supported end to end. The safe path is to clean or manually "
+        "backfill that data outside the migration before "
         f"rerunning it. Rows detected: {formatted_rows}"
     )
 

@@ -4,6 +4,7 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from uuid import UUID
 
 from app.analytics.common import get_next_month_start, normalize_money
@@ -51,6 +52,7 @@ class RecurringCandidateRow:
 
 @dataclass(slots=True)
 class RecurringCandidate:
+    recurring_candidate_key: str
     label: str
     description: str | None
     category_id: UUID
@@ -258,6 +260,14 @@ def _serialize_candidate(
     interval_days = _build_interval_days(streak)
 
     return RecurringCandidate(
+        recurring_candidate_key=build_recurring_candidate_key(
+            match_basis=match_basis,
+            direction=representative.direction,
+            category_id=representative.category_id,
+            currency=representative.currency,
+            normalized_description=representative.normalized_description,
+            amount=representative.amount,
+        ),
         label=label,
         description=representative.description,
         category_id=representative.category_id,
@@ -337,6 +347,33 @@ def _month_delta(previous_date: date, current_date: date) -> int:
 
 def _is_month_end(value: date) -> bool:
     return value.day == monthrange(value.year, value.month)[1]
+
+
+def build_recurring_candidate_key(
+    *,
+    match_basis: str,
+    direction: str,
+    category_id: UUID,
+    currency: str,
+    normalized_description: str | None = None,
+    amount: Decimal | None = None,
+) -> str:
+    if match_basis == "description":
+        identity_value = normalized_description or ""
+    else:
+        identity_value = str(normalize_money(amount or Decimal("0.00")))
+
+    raw_key = "|".join(
+        (
+            "rc_v1",
+            match_basis,
+            direction,
+            str(category_id),
+            currency.upper(),
+            identity_value,
+        )
+    )
+    return sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 def _clean_description(value: str | None) -> str | None:

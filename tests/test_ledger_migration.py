@@ -24,7 +24,7 @@ spec.loader.exec_module(migration)
 def test_detected_legacy_rows_raise_clear_error():
     with pytest.raises(
         RuntimeError,
-        match="legacy transfer/adjustment rows created before M1",
+        match="legacy transfer/adjustment rows created before transfer and adjustment flows were supported end to end",
     ):
         migration._raise_for_detected_legacy_ledger_rows(
             [

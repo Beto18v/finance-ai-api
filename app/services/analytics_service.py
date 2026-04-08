@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from fastapi import HTTPException
 from uuid import UUID
 
-from sqlalchemy import String, and_, cast, func
+from sqlalchemy import String, and_, case, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.analytics import (
@@ -14,14 +14,17 @@ from app.analytics import (
 )
 from app.analytics.common import (
     AGGREGATED_TRANSACTION_TYPES,
+    normalize_money,
     resolve_month_utc_range,
 )
 from app.analytics.recurring_candidates import (
     ANALYSIS_WINDOW_DAYS,
+    RecurringCandidate,
     RecurringCandidateRow,
     build_recurring_candidates,
 )
 from app.models.category import Category, CategoryDirection
+from app.models.obligation import Obligation, ObligationStatus
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.analytics import (
     AnalyticsCategoryBreakdownItemRead,
@@ -228,12 +231,18 @@ def get_analytics_recurring_candidates(
         month_start=month_start,
         timezone_name=user.timezone or "UTC",
     )
+    confirmed_obligations_by_key = _get_confirmed_obligations_by_recurring_candidate_key(
+        db,
+        user_id=user_id,
+        candidates=overview.candidates,
+    )
 
     return AnalyticsRecurringCandidatesRead(
         month_start=overview.month_start,
         history_window_start=overview.history_window_start,
         candidates=[
             AnalyticsRecurringCandidateRead(
+                recurring_candidate_key=item.recurring_candidate_key,
                 label=item.label,
                 description=item.description,
                 category_id=item.category_id,
@@ -250,10 +259,122 @@ def get_analytics_recurring_candidates(
                 interval_days=item.interval_days,
                 first_occurred_at=item.first_occurred_at,
                 last_occurred_at=item.last_occurred_at,
+                confirmed_obligation_id=confirmed_obligations_by_key.get(
+                    item.recurring_candidate_key,
+                    {},
+                ).get("id"),
+                confirmed_obligation_status=confirmed_obligations_by_key.get(
+                    item.recurring_candidate_key,
+                    {},
+                ).get("status"),
             )
             for item in overview.candidates
         ],
     )
+
+
+def _get_confirmed_obligations_by_recurring_candidate_key(
+    db: Session,
+    *,
+    user_id: UUID,
+    candidates: list[RecurringCandidate],
+) -> dict[str, dict[str, UUID | str]]:
+    recurring_candidate_keys = [item.recurring_candidate_key for item in candidates]
+    normalized_keys = list(dict.fromkeys(recurring_candidate_keys))
+    if not candidates:
+        return {}
+
+    status_rank = case(
+        (Obligation.status == ObligationStatus.active, 0),
+        (Obligation.status == ObligationStatus.paused, 1),
+        else_=2,
+    )
+    rows = (
+        db.query(
+            Obligation.source_recurring_candidate_key,
+            Obligation.id,
+            Obligation.category_id,
+            Obligation.name,
+            Obligation.amount,
+            Obligation.cadence,
+            Obligation.status,
+        )
+        .filter(
+            Obligation.user_id == user_id,
+            or_(
+                Obligation.source_recurring_candidate_key.in_(normalized_keys),
+                Obligation.source_recurring_candidate_key.is_(None),
+            ),
+        )
+        .order_by(
+            status_rank.asc(),
+            Obligation.created_at.asc(),
+            Obligation.id.asc(),
+        )
+        .all()
+    )
+
+    confirmed_obligations_by_key: dict[str, dict[str, UUID | str]] = {}
+    legacy_obligations_by_key: dict[str, dict[str, UUID | str]] = {}
+    for row in rows:
+        payload = {
+            "id": row.id,
+            "status": row.status.value,
+        }
+        if row.source_recurring_candidate_key is not None:
+            if row.source_recurring_candidate_key in confirmed_obligations_by_key:
+                continue
+            confirmed_obligations_by_key[row.source_recurring_candidate_key] = payload
+            continue
+
+        legacy_key = _build_legacy_candidate_match_key(
+            category_id=row.category_id,
+            cadence=row.cadence.value,
+            amount=row.amount,
+            name=row.name,
+        )
+        legacy_obligations_by_key.setdefault(legacy_key, payload)
+
+    for candidate in candidates:
+        if candidate.direction != "expense":
+            continue
+        if candidate.recurring_candidate_key in confirmed_obligations_by_key:
+            continue
+        legacy_match = legacy_obligations_by_key.get(
+            _build_legacy_candidate_match_key(
+                category_id=candidate.category_id,
+                cadence=candidate.cadence,
+                amount=candidate.typical_amount,
+                name=candidate.label,
+            )
+        )
+        if legacy_match is not None:
+            confirmed_obligations_by_key[candidate.recurring_candidate_key] = (
+                legacy_match
+            )
+
+    return confirmed_obligations_by_key
+
+
+def _build_legacy_candidate_match_key(
+    *,
+    category_id: UUID,
+    cadence: str,
+    amount,
+    name: str,
+) -> str:
+    return "|".join(
+        (
+            str(category_id),
+            cadence,
+            str(normalize_money(amount)),
+            _normalize_candidate_label(name),
+        )
+    )
+
+
+def _normalize_candidate_label(value: str) -> str:
+    return " ".join(str(value).split()).strip().lower()
 
 
 def _get_recent_transactions_for_month(

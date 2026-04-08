@@ -16,6 +16,7 @@ from app.routes import (
     category_routes,
     financial_account_routes,
     ledger_routes,
+    obligation_routes,
     transaction_routes,
     transfer_routes,
     user_routes,
@@ -28,6 +29,7 @@ async def lifespan(_: FastAPI):
     from app.models.user import User  # noqa: F401
     from app.models.category import Category  # noqa: F401
     from app.models.financial_account import FinancialAccount  # noqa: F401
+    from app.models.obligation import Obligation  # noqa: F401
     from app.models.transaction import Transaction  # noqa: F401
     from app.models.exchange_rate import ExchangeRate  # noqa: F401
 
@@ -67,3 +69,4 @@ app.include_router(adjustment_routes.router)
 app.include_router(ledger_routes.router)
 app.include_router(balance_routes.router)
 app.include_router(analytics_routes.router)
+app.include_router(obligation_routes.router)

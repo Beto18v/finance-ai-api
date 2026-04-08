@@ -50,6 +50,9 @@ class CompatTestClient:
     def put(self, url: str, **kwargs):
         return self.request("PUT", url, **kwargs)
 
+    def patch(self, url: str, **kwargs):
+        return self.request("PATCH", url, **kwargs)
+
     def delete(self, url: str, **kwargs):
         return self.request("DELETE", url, **kwargs)
 
@@ -89,10 +92,11 @@ def engine():
     from app.models.user import User
     from app.models.category import Category
     from app.models.financial_account import FinancialAccount
+    from app.models.obligation import Obligation
     from app.models.transaction import Transaction
     from app.models.exchange_rate import ExchangeRate
 
-    _ = (User, Category, FinancialAccount, Transaction, ExchangeRate)
+    _ = (User, Category, FinancialAccount, Obligation, Transaction, ExchangeRate)
 
     Base.metadata.create_all(bind=engine_)
     return engine_

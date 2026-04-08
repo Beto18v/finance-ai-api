@@ -65,6 +65,11 @@ class FinancialAccount(Base):
         back_populates="financial_account",
     )
 
+    expected_obligations = relationship(
+        "Obligation",
+        back_populates="expected_financial_account",
+    )
+
     __table_args__ = (
         Index("idx_financial_accounts_user", "user_id"),
         Index(
