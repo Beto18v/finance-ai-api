@@ -41,6 +41,7 @@ from app.services.ledger_shared import (
     ensure_transaction_currency_matches_user_base_currency,
     resolve_financial_account,
 )
+from app.services.obligation_schedule import advance_due_date
 from app.services.user_service import ensure_active_user
 
 DUE_SOON_WINDOW_DAYS = 7
@@ -282,6 +283,14 @@ def get_upcoming_obligations(
     window_end_date = resolved_reference_date.fromordinal(
         resolved_reference_date.toordinal() + days_ahead
     )
+    upcoming_obligations = (
+        _build_obligations_query(db, user_id)
+        .filter(
+            Obligation.status == ObligationStatus.active,
+            Obligation.next_due_date <= window_end_date,
+        )
+        .all()
+    )
 
     active_count = int(
         db.query(func.count(Obligation.id))
@@ -293,32 +302,24 @@ def get_upcoming_obligations(
         or 0
     )
 
-    obligations = (
-        _build_obligations_query(db, user_id)
-        .filter(
-            Obligation.status == ObligationStatus.active,
-            Obligation.next_due_date <= window_end_date,
-        )
-        .limit(limit)
-        .all()
-    )
     balance_by_account_id = _get_financial_account_balances(
         db,
         user_id=user_id,
         account_ids=[
             obligation.expected_financial_account_id
-            for obligation in obligations
+            for obligation in upcoming_obligations
             if obligation.expected_financial_account_id is not None
         ],
     )
-    items = [
+    serialized_upcoming_obligations = [
         serialize_obligation(
             obligation,
             reference_date=resolved_reference_date,
             expected_account_balance_by_id=balance_by_account_id,
         )
-        for obligation in obligations
+        for obligation in upcoming_obligations
     ]
+    items = serialized_upcoming_obligations[:limit]
 
     return ObligationUpcomingRead(
         reference_date=resolved_reference_date,
@@ -326,18 +327,30 @@ def get_upcoming_obligations(
         summary=ObligationUpcomingSummaryRead(
             currency=user.base_currency,
             total_active=active_count,
-            items_in_window=len(items),
-            overdue_count=sum(1 for item in items if item.urgency == "overdue"),
-            due_today_count=sum(1 for item in items if item.urgency == "today"),
-            due_soon_count=sum(1 for item in items if item.urgency == "soon"),
+            items_in_window=len(serialized_upcoming_obligations),
+            overdue_count=sum(
+                1
+                for item in serialized_upcoming_obligations
+                if item.urgency == "overdue"
+            ),
+            due_today_count=sum(
+                1
+                for item in serialized_upcoming_obligations
+                if item.urgency == "today"
+            ),
+            due_soon_count=sum(
+                1
+                for item in serialized_upcoming_obligations
+                if item.urgency == "soon"
+            ),
             expected_account_risk_count=sum(
                 1
-                for item in items
+                for item in serialized_upcoming_obligations
                 if item.expected_account_shortfall_amount is not None
                 and item.expected_account_shortfall_amount > 0
             ),
             total_expected_amount=sum(
-                (item.amount for item in items),
+                (item.amount for item in serialized_upcoming_obligations),
                 start=Decimal("0.00"),
             ),
         ),
@@ -495,32 +508,11 @@ def resolve_obligation_reference_date(timezone_name: str | None) -> date:
 
 
 def advance_obligation_due_date(obligation: Obligation) -> date:
-    if obligation.cadence == ObligationCadence.weekly:
-        return obligation.next_due_date.fromordinal(
-            obligation.next_due_date.toordinal() + 7
-        )
-    if obligation.cadence == ObligationCadence.biweekly:
-        return obligation.next_due_date.fromordinal(
-            obligation.next_due_date.toordinal() + 14
-        )
-
-    next_month_year, next_month = _shift_month(
-        obligation.next_due_date.year,
-        obligation.next_due_date.month,
-        1,
-    )
-    if obligation.monthly_anchor_is_month_end:
-        return date(
-            next_month_year,
-            next_month,
-            monthrange(next_month_year, next_month)[1],
-        )
-
-    anchor_day = obligation.monthly_anchor_day or obligation.next_due_date.day
-    return date(
-        next_month_year,
-        next_month,
-        min(anchor_day, monthrange(next_month_year, next_month)[1]),
+    return advance_due_date(
+        cadence=obligation.cadence,
+        due_date=obligation.next_due_date,
+        monthly_anchor_day=obligation.monthly_anchor_day,
+        monthly_anchor_is_month_end=obligation.monthly_anchor_is_month_end,
     )
 
 
@@ -728,10 +720,3 @@ def _normalize_decimal(value: Decimal | int | float | None) -> Decimal:
         normalized = Decimal(str(value))
 
     return normalized.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def _shift_month(year: int, month: int, months: int) -> tuple[int, int]:
-    total_months = (year * 12) + (month - 1) + months
-    shifted_year = total_months // 12
-    shifted_month = (total_months % 12) + 1
-    return shifted_year, shifted_month

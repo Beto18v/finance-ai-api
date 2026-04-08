@@ -249,6 +249,25 @@ def test_upcoming_obligations_calculate_urgency_and_expected_account_risk(
     assert data["items"][3]["urgency"] == "upcoming"
     assert data["items"][3]["days_until_due"] == 18
 
+    limited_response = client.get("/obligations/upcoming?days_ahead=30&limit=2")
+    assert limited_response.status_code == 200
+
+    limited_data = limited_response.json()
+    assert limited_data["summary"] == {
+        "currency": "COP",
+        "total_active": 4,
+        "items_in_window": 4,
+        "overdue_count": 1,
+        "due_today_count": 1,
+        "due_soon_count": 1,
+        "expected_account_risk_count": 1,
+        "total_expected_amount": "1000.00",
+    }
+    assert [item["id"] for item in limited_data["items"]] == [
+        overdue["id"],
+        due_today["id"],
+    ]
+
 
 def test_mark_paid_creates_real_expense_and_advances_month_end_due_date(client):
     cleanup = client.delete("/users/me")

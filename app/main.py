@@ -13,6 +13,7 @@ from app.routes import (
     adjustment_routes,
     analytics_routes,
     balance_routes,
+    cashflow_routes,
     category_routes,
     financial_account_routes,
     ledger_routes,
@@ -68,5 +69,6 @@ app.include_router(transfer_routes.router)
 app.include_router(adjustment_routes.router)
 app.include_router(ledger_routes.router)
 app.include_router(balance_routes.router)
+app.include_router(cashflow_routes.router)
 app.include_router(analytics_routes.router)
 app.include_router(obligation_routes.router)
