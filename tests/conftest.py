@@ -92,11 +92,21 @@ def engine():
     from app.models.user import User
     from app.models.category import Category
     from app.models.financial_account import FinancialAccount
+    from app.models.ingestion import ImportItem, ImportSession
     from app.models.obligation import Obligation
     from app.models.transaction import Transaction
     from app.models.exchange_rate import ExchangeRate
 
-    _ = (User, Category, FinancialAccount, Obligation, Transaction, ExchangeRate)
+    _ = (
+        User,
+        Category,
+        FinancialAccount,
+        ImportItem,
+        ImportSession,
+        Obligation,
+        Transaction,
+        ExchangeRate,
+    )
 
     Base.metadata.create_all(bind=engine_)
     return engine_
